@@ -1,0 +1,23 @@
+name: "百度网盘备份 (Baidu Netdisk Backup)"
+version: "1.0.0"
+slug: "baidu_netdisk_backup"
+description: "自动将 Home Assistant 备份文件上传到百度网盘 (正式版)"
+url: "https://gitee.com/mxmaimooo/hassio-addon-baidunetdisk-backup"
+startup: application
+arch:
+  - aarch64
+  - amd64
+  - armv7
+  - armhf
+  - i386
+boot: auto
+map:
+  - "backup:rw"
+options:
+  refresh_token: ""
+  upload_path: "/HomeAssistant/Backup"
+  schedule: "0 5 * * *"
+schema:
+  refresh_token: str
+  upload_path: str?
+  schedule: str?
