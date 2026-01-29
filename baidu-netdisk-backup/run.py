@@ -616,15 +616,50 @@ def retention_folder_mode(client, base_upload_path, retention):
     weekly_items = client.list_remote_files(weekly_dir) or []
     monthly_items = client.list_remote_files(monthly_dir) or []
 
-    weekly_keep_from_daily = _select_bucket_keep_paths(
-        daily_items,
-        bucket_key_fn=lambda dt: (dt.isocalendar().year, dt.isocalendar().week),
-        keep_count=weekly_n,
-    )
     monthly_keep_from_daily = _select_bucket_keep_paths(
         daily_items,
         bucket_key_fn=lambda dt: (dt.year, dt.month),
         keep_count=monthly_n,
+    )
+
+    existing_month_keys = set()
+    for item in monthly_items:
+        if item.get("isdir") == 1:
+            continue
+        dt = _infer_backup_datetime(item)
+        if not dt:
+            continue
+        existing_month_keys.add((dt.year, dt.month))
+
+    path_to_item = {}
+    for item in daily_items:
+        path = item.get("path")
+        if path:
+            path_to_item[path] = item
+
+    moves_to_monthly = []
+    for path in monthly_keep_from_daily:
+        item = path_to_item.get(path) or {}
+        dt = _infer_backup_datetime(item)
+        if not dt:
+            continue
+        key = (dt.year, dt.month)
+        if key in existing_month_keys:
+            continue
+        moves_to_monthly.append({"path": path, "dest": monthly_dir, "ondup": "overwrite"})
+
+    if moves_to_monthly:
+        log(f"Retention folders: promoting {len(moves_to_monthly)} backups to monthly")
+        client.move_remote_files(moves_to_monthly)
+
+    # Refresh daily list after monthly moves
+    daily_items = client.list_remote_files(daily_dir) or []
+
+    # Weekly promotion (from remaining daily files)
+    weekly_keep_from_daily = _select_bucket_keep_paths(
+        daily_items,
+        bucket_key_fn=lambda dt: (dt.isocalendar().year, dt.isocalendar().week),
+        keep_count=weekly_n,
     )
 
     existing_week_keys = set()
@@ -635,15 +670,6 @@ def retention_folder_mode(client, base_upload_path, retention):
         if not dt:
             continue
         existing_week_keys.add((dt.isocalendar().year, dt.isocalendar().week))
-
-    existing_month_keys = set()
-    for item in monthly_items:
-        if item.get("isdir") == 1:
-            continue
-        dt = _infer_backup_datetime(item)
-        if not dt:
-            continue
-        existing_month_keys.add((dt.year, dt.month))
 
     path_to_item = {}
     for item in daily_items:
@@ -665,29 +691,6 @@ def retention_folder_mode(client, base_upload_path, retention):
     if moves_to_weekly:
         log(f"Retention folders: promoting {len(moves_to_weekly)} backups to weekly")
         client.move_remote_files(moves_to_weekly)
-
-    # Refresh daily list after moves
-    daily_items = client.list_remote_files(daily_dir) or []
-    path_to_item = {}
-    for item in daily_items:
-        path = item.get("path")
-        if path:
-            path_to_item[path] = item
-
-    moves_to_monthly = []
-    for path in monthly_keep_from_daily:
-        item = path_to_item.get(path) or {}
-        dt = _infer_backup_datetime(item)
-        if not dt:
-            continue
-        key = (dt.year, dt.month)
-        if key in existing_month_keys:
-            continue
-        moves_to_monthly.append({"path": path, "dest": monthly_dir, "ondup": "overwrite"})
-
-    if moves_to_monthly:
-        log(f"Retention folders: promoting {len(moves_to_monthly)} backups to monthly")
-        client.move_remote_files(moves_to_monthly)
 
     # Cleanup phase: enforce per-folder counts
     daily_items = client.list_remote_files(daily_dir) or []
