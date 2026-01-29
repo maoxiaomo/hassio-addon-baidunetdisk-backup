@@ -17,7 +17,15 @@ options:
   refresh_token: ""
   upload_path: "/HomeAssistant/Backup"
   schedule: "0 5 * * *"
+  retention_use_folders: false
+  retention_daily: 0
+  retention_weekly: 0
+  retention_monthly: 0
 schema:
   refresh_token: str
   upload_path: str?
   schedule: str?
+  retention_use_folders: bool?
+  retention_daily: int?
+  retention_weekly: int?
+  retention_monthly: int?
