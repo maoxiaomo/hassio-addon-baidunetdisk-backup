@@ -1,12 +1,12 @@
 # 百度网盘备份 - Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)
 ![Auth](https://img.shields.io/badge/认证方式-OAuth_2.0-green.svg)
 ![Python](https://img.shields.io/badge/Python-3.11-yellow.svg)
 
 一个用于 Home Assistant 的 Supervisor 加载项 (Add-on)，可以自动将您的 HA 备份文件同步上传到百度网盘。
 
-> **v1.0.0 正式发布！**
+> **v1.0.1 更新发布！**
 >
 > 采用与 **AList** 完全相同的百度官方 OAuth 2.0 接口和 API 调用方式，稳定可靠。
 
@@ -19,6 +19,8 @@
 - **⚡ 极速秒传**：利用百度网盘秒传机制，GB 级文件也能瞬间完成备份。
 - **📦 分片上传**：大文件自动分片上传，网络波动也能断点续传。
 - **⏰ 灵活定时**：支持 Cron 表达式配置，精确控制备份时间。
+- **🧹 分层保留**：支持远端备份分层保留策略（daily/weekly/monthly），自动清理旧备份，避免网盘容量持续增长。
+- **🗂️ 目录模式（可选）**：在 `upload_path` 下自动创建 `daily/`、`weekly/`、`monthly/` 三个目录并分类存放（通过移动归档，不重复占用空间）。
 
 ---
 
@@ -81,6 +83,10 @@
 | `refresh_token` | ✅ | (无) | **必填**。从上一步获取的令牌。 |
 | `upload_path` | ❌ | `/HomeAssistant/Backup` | 网盘中的目标文件夹路径。会自动创建。 |
 | `schedule` | ❌ | `0 5 * * *` | 定时任务的 Cron 表达式。 |
+| `retention.daily` | ❌ | (不启用) | 远端保留：按“天”保留最近 N 份（同一天多份只保留最新一份）。 |
+| `retention.weekly` | ❌ | (不启用) | 远端保留：按“周”保留最近 N 份（同一周只保留最新一份）。 |
+| `retention.monthly` | ❌ | (不启用) | 远端保留：按“月”保留最近 N 份（同一月只保留最新一份）。 |
+| `retention.use_folders` | ❌ | `false` | 是否启用目录模式。启用后会在 `upload_path` 下使用 `daily/weekly/monthly` 三个子目录。 |
 
 ### 📝 配置示例
 
@@ -88,6 +94,15 @@
 refresh_token: "122.a0b1c2d3e4f5g6h7i8j9k0l1m2n3o4p5..."
 upload_path: "/HomeAssistant/Backup"
 schedule: "0 5 * * *"  # 每天凌晨5点执行
+
+# 远端分层保留（推荐：daily=7、weekly=4、monthly=12）
+retention:
+  daily: 7
+  weekly: 4
+  monthly: 12
+
+# 可选：开启目录模式（云端会使用 /HomeAssistant/Backup/daily|weekly|monthly 三个目录）
+  use_folders: true
 ```
 
 ### ⏰ Cron 表达式参考
@@ -116,7 +131,11 @@ schedule: "0 5 * * *"  # 每天凌晨5点执行
 **A:** 这通常是因为您没有先在浏览器中登录百度网盘。请先访问 pan.baidu.com 登录，然后再点击授权链接。
 
 #### Q: 备份文件在哪里？
-**A:** 文件位于百度网盘的 **`/HomeAssistant/Backup`** 目录下（根目录）。配置 `upload_path` 时直接填写路径即可，如 `/HomeAssistant/Backup`。
+**A:** 默认情况下文件位于百度网盘的 **`/HomeAssistant/Backup`** 目录下。若开启目录模式（`retention.use_folders: true`），则会存放在：
+
+- `upload_path/daily/`
+- `upload_path/weekly/`
+- `upload_path/monthly/`
 
 #### Q: Token 会过期吗？需要定期更换吗？
 **A:** 不需要。插件内置了 Token 自动刷新机制，只要您不取消授权，Token 会一直自动续期。
@@ -125,7 +144,10 @@ schedule: "0 5 * * *"  # 每天凌晨5点执行
 **A:** 这表示您的备份文件在百度网盘云端已经存在（可能是您手动上传过，或者之前的任务已经上传成功），因此插件跳过了实际传输，直接完成了"上传"。这是正常且高效的表现。
 
 #### Q: 本地删除了备份，网盘上也会删除吗？
-**A:** **不会**。本插件采用"只增不减"的备份策略。即使 Home Assistant 自动删除了本地的旧备份，网盘上的文件依然会保留，以作为永久的历史存档。
+**A:** 分两种情况：
+
+- **未启用保留策略**（不配置 `retention.daily/weekly/monthly`）：网盘不会自动删除，表现为"只增不减"。
+- **启用保留策略**（配置了 `retention.daily/weekly/monthly`）：插件会在云端按保留规则自动清理旧备份。
 
 ---
 

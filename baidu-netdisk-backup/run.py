@@ -10,7 +10,8 @@ import sys
 import glob
 import requests
 import hashlib
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 
 # === Configuration ===
 CONFIG_PATH = "/data/options.json"
@@ -272,25 +273,118 @@ class BaiduClient:
         self._ensure_token()
         log(f"Listing files in remote dir: {remote_dir}")
         url = "https://pan.baidu.com/rest/2.0/xpan/file"
-        params = {
-            "method": "list",
-            "access_token": self.access_token,
-            "dir": remote_dir,
-            "limit": 100
-        }
-        try:
-            resp = requests.get(url, params=params, timeout=30)
-            data = resp.json()
-            if data.get("errno") == 0:
-                files = data.get("list", [])
-                log(f"--- Remote Directory Content ({len(files)} files) ---")
-                for f in files:
-                    log(f"[{'DIR' if f['isdir']==1 else 'FILE'}] {f['server_filename']} ({f['size']} bytes)")
-                log("------------------------------------------------")
-            else:
+
+        all_items = []
+        start = 0
+        limit = 1000
+        while True:
+            params = {
+                "method": "list",
+                "access_token": self.access_token,
+                "dir": remote_dir,
+                "limit": limit,
+                "start": start
+            }
+            try:
+                resp = requests.get(url, params=params, timeout=30)
+                data = resp.json()
+            except Exception as e:
+                log(f"Error listing remote files: {e}")
+                break
+
+            if data.get("errno") != 0:
                 log(f"Failed to list remote files: {data}")
-        except Exception as e:
-            log(f"Error listing remote files: {e}")
+                break
+
+            items = data.get("list", [])
+            all_items.extend(items)
+
+            has_more = data.get("has_more")
+            if has_more is False:
+                break
+
+            if len(items) < limit:
+                break
+
+            start += len(items)
+
+        log(f"--- Remote Directory Content ({len(all_items)} files) ---")
+        for f in all_items:
+            log(f"[{'DIR' if f.get('isdir')==1 else 'FILE'}] {f.get('server_filename')} ({f.get('size')} bytes)")
+        log("------------------------------------------------")
+        return all_items
+
+    def delete_remote_files(self, remote_paths):
+        self._ensure_token()
+        if not remote_paths:
+            return True
+
+        url = "https://pan.baidu.com/rest/2.0/xpan/file"
+        params = {
+            "method": "filemanager",
+            "access_token": self.access_token,
+            "opera": "delete"
+        }
+        headers = {
+            "User-Agent": "pan.baidu.com"
+        }
+
+        ok = True
+        batch_size = 100
+        for i in range(0, len(remote_paths), batch_size):
+            batch = remote_paths[i:i + batch_size]
+            form_data = {
+                "async": "0",
+                "filelist": json.dumps(batch)
+            }
+            try:
+                resp = requests.post(url, params=params, data=form_data, headers=headers, timeout=60)
+                data = resp.json()
+                if data.get("errno") == 0:
+                    log(f"Deleted {len(batch)} remote files")
+                else:
+                    ok = False
+                    log(f"Failed to delete remote files: {data}")
+            except Exception as e:
+                ok = False
+                log(f"Error deleting remote files: {e}")
+        return ok
+
+    def move_remote_files(self, moves):
+        self._ensure_token()
+        if not moves:
+            return True
+
+        url = "https://pan.baidu.com/rest/2.0/xpan/file"
+        params = {
+            "method": "filemanager",
+            "access_token": self.access_token,
+            "opera": "move"
+        }
+        headers = {
+            "User-Agent": "pan.baidu.com"
+        }
+
+        ok = True
+        batch_size = 100
+        for i in range(0, len(moves), batch_size):
+            batch = moves[i:i + batch_size]
+            form_data = {
+                "async": "0",
+                "filelist": json.dumps(batch)
+            }
+            try:
+                resp = requests.post(url, params=params, data=form_data, headers=headers, timeout=60)
+                data = resp.json()
+                if data.get("errno") == 0:
+                    log(f"Moved {len(batch)} remote files")
+                else:
+                    ok = False
+                    log(f"Failed to move remote files: {data}")
+            except Exception as e:
+                ok = False
+                log(f"Error moving remote files: {e}")
+        return ok
 
     def create_remote_dir(self, remote_dir):
         """Explicitly create remote directory (AList compatible)"""
@@ -322,6 +416,11 @@ class BaiduClient:
             elif res.get("errno") == -8: # File already exists
                 log(f"Directory already exists: {remote_dir}")
                 return True
+            # Some environments return a non-standard payload without errno when directory exists.
+            # Treat it as success if it resembles a directory metadata response.
+            elif "path" in res or "fs_id" in res or "category" in res:
+                log(f"Directory exists (non-standard response): {remote_dir}")
+                return True
             else:
                 log(f"Failed to create directory: {res}")
                 return False
@@ -330,6 +429,315 @@ class BaiduClient:
             return False
 
 # === Main Logic ===
+_BACKUP_TS_RE = re.compile(r"_(\d{4}-\d{2}-\d{2})_(\d{2})\.(\d{2})_")
+
+
+def _infer_backup_datetime(item):
+    name = (item.get("server_filename") or "").strip()
+    m = _BACKUP_TS_RE.search(name)
+    if m:
+        try:
+            date_part = m.group(1)
+            hour = int(m.group(2))
+            minute = int(m.group(3))
+            return datetime.strptime(date_part, "%Y-%m-%d").replace(hour=hour, minute=minute)
+        except Exception:
+            pass
+
+    mtime = item.get("server_mtime") or item.get("server_ctime")
+    if mtime:
+        try:
+            return datetime.fromtimestamp(int(mtime))
+        except Exception:
+            return None
+    return None
+
+
+def _infer_backup_timestamp(item):
+    dt = _infer_backup_datetime(item)
+    if not dt:
+        return None
+    return int(dt.timestamp())
+
+
+def _compute_retention_keep_paths(remote_items, daily, weekly, monthly):
+    files = []
+    for item in remote_items:
+        if item.get("isdir") == 1:
+            continue
+        name = item.get("server_filename") or ""
+        if not name.endswith(".tar"):
+            continue
+        path = item.get("path")
+        ts = _infer_backup_timestamp(item)
+        if not path or not ts:
+            continue
+        files.append((path, int(ts)))
+
+    files.sort(key=lambda x: x[1], reverse=True)
+
+    keep = set()
+
+    if daily and daily > 0:
+        seen = set()
+        for path, mtime in files:
+            day = datetime.fromtimestamp(mtime).date()
+            if day in seen:
+                continue
+            keep.add(path)
+            seen.add(day)
+            if len(seen) >= daily:
+                break
+
+    if weekly and weekly > 0:
+        seen = set()
+        for path, mtime in files:
+            dt = datetime.fromtimestamp(mtime)
+            key = dt.isocalendar().year, dt.isocalendar().week
+            if key in seen:
+                continue
+            if path in keep:
+                seen.add(key)
+                if len(seen) >= weekly:
+                    break
+                continue
+            keep.add(path)
+            seen.add(key)
+            if len(seen) >= weekly:
+                break
+
+    if monthly and monthly > 0:
+        seen = set()
+        for path, mtime in files:
+            dt = datetime.fromtimestamp(mtime)
+            key = dt.year, dt.month
+            if key in seen:
+                continue
+            if path in keep:
+                seen.add(key)
+                if len(seen) >= monthly:
+                    break
+                continue
+            keep.add(path)
+            seen.add(key)
+            if len(seen) >= monthly:
+                break
+
+    return keep
+
+
+def _select_bucket_keep_paths(remote_items, bucket_key_fn, keep_count):
+    files = []
+    for item in remote_items:
+        if item.get("isdir") == 1:
+            continue
+        name = item.get("server_filename") or ""
+        if not name.endswith(".tar"):
+            continue
+        path = item.get("path")
+        dt = _infer_backup_datetime(item)
+        if not path or not dt:
+            continue
+        files.append((path, dt))
+
+    files.sort(key=lambda x: x[1], reverse=True)
+
+    keep = set()
+    seen = set()
+    for path, dt in files:
+        key = bucket_key_fn(dt)
+        if key in seen:
+            continue
+        keep.add(path)
+        seen.add(key)
+        if keep_count and keep_count > 0 and len(seen) >= keep_count:
+            break
+    return keep
+
+
+def cleanup_remote_backups(client, upload_path, retention):
+    if not retention:
+        return
+
+    daily = int(retention.get("daily", 0) or 0)
+    weekly = int(retention.get("weekly", 0) or 0)
+    monthly = int(retention.get("monthly", 0) or 0)
+
+    if daily <= 0 and weekly <= 0 and monthly <= 0:
+        return
+
+    remote_items = client.list_remote_files(upload_path) or []
+    keep = _compute_retention_keep_paths(remote_items, daily=daily, weekly=weekly, monthly=monthly)
+    candidates = []
+    for item in remote_items:
+        if item.get("isdir") == 1:
+            continue
+        name = item.get("server_filename") or ""
+        if not name.endswith(".tar"):
+            continue
+        path = item.get("path")
+        if path and path not in keep:
+            candidates.append(path)
+
+    if not candidates:
+        log("Remote retention: nothing to delete")
+        return
+
+    log(f"Remote retention: keeping {len(keep)} backups, deleting {len(candidates)} backups")
+    client.delete_remote_files(candidates)
+
+
+def _join_remote_dir(base_dir, name):
+    if base_dir.endswith("/"):
+        base_dir = base_dir[:-1]
+    if not name:
+        return base_dir
+    if name.startswith("/"):
+        name = name[1:]
+    return f"{base_dir}/{name}"
+
+
+def retention_folder_mode(client, base_upload_path, retention):
+    daily_n = int(retention.get("daily", 0) or 0)
+    weekly_n = int(retention.get("weekly", 0) or 0)
+    monthly_n = int(retention.get("monthly", 0) or 0)
+
+    daily_dir = _join_remote_dir(base_upload_path, "daily")
+    weekly_dir = _join_remote_dir(base_upload_path, "weekly")
+    monthly_dir = _join_remote_dir(base_upload_path, "monthly")
+
+    client.create_remote_dir(base_upload_path)
+    client.create_remote_dir(daily_dir)
+    client.create_remote_dir(weekly_dir)
+    client.create_remote_dir(monthly_dir)
+
+    # Promotion phase
+    daily_items = client.list_remote_files(daily_dir) or []
+    weekly_items = client.list_remote_files(weekly_dir) or []
+    monthly_items = client.list_remote_files(monthly_dir) or []
+
+    weekly_keep_from_daily = _select_bucket_keep_paths(
+        daily_items,
+        bucket_key_fn=lambda dt: (dt.isocalendar().year, dt.isocalendar().week),
+        keep_count=weekly_n,
+    )
+    monthly_keep_from_daily = _select_bucket_keep_paths(
+        daily_items,
+        bucket_key_fn=lambda dt: (dt.year, dt.month),
+        keep_count=monthly_n,
+    )
+
+    existing_week_keys = set()
+    for item in weekly_items:
+        if item.get("isdir") == 1:
+            continue
+        dt = _infer_backup_datetime(item)
+        if not dt:
+            continue
+        existing_week_keys.add((dt.isocalendar().year, dt.isocalendar().week))
+
+    existing_month_keys = set()
+    for item in monthly_items:
+        if item.get("isdir") == 1:
+            continue
+        dt = _infer_backup_datetime(item)
+        if not dt:
+            continue
+        existing_month_keys.add((dt.year, dt.month))
+
+    path_to_item = {}
+    for item in daily_items:
+        path = item.get("path")
+        if path:
+            path_to_item[path] = item
+
+    moves_to_weekly = []
+    for path in weekly_keep_from_daily:
+        item = path_to_item.get(path) or {}
+        dt = _infer_backup_datetime(item)
+        if not dt:
+            continue
+        key = (dt.isocalendar().year, dt.isocalendar().week)
+        if key in existing_week_keys:
+            continue
+        moves_to_weekly.append({"path": path, "dest": weekly_dir, "ondup": "overwrite"})
+
+    if moves_to_weekly:
+        log(f"Retention folders: promoting {len(moves_to_weekly)} backups to weekly")
+        client.move_remote_files(moves_to_weekly)
+
+    # Refresh daily list after moves
+    daily_items = client.list_remote_files(daily_dir) or []
+    path_to_item = {}
+    for item in daily_items:
+        path = item.get("path")
+        if path:
+            path_to_item[path] = item
+
+    moves_to_monthly = []
+    for path in monthly_keep_from_daily:
+        item = path_to_item.get(path) or {}
+        dt = _infer_backup_datetime(item)
+        if not dt:
+            continue
+        key = (dt.year, dt.month)
+        if key in existing_month_keys:
+            continue
+        moves_to_monthly.append({"path": path, "dest": monthly_dir, "ondup": "overwrite"})
+
+    if moves_to_monthly:
+        log(f"Retention folders: promoting {len(moves_to_monthly)} backups to monthly")
+        client.move_remote_files(moves_to_monthly)
+
+    # Cleanup phase: enforce per-folder counts
+    daily_items = client.list_remote_files(daily_dir) or []
+    weekly_items = client.list_remote_files(weekly_dir) or []
+    monthly_items = client.list_remote_files(monthly_dir) or []
+
+    daily_keep = _select_bucket_keep_paths(
+        daily_items,
+        bucket_key_fn=lambda dt: dt.date(),
+        keep_count=daily_n,
+    )
+    weekly_keep = _select_bucket_keep_paths(
+        weekly_items,
+        bucket_key_fn=lambda dt: (dt.isocalendar().year, dt.isocalendar().week),
+        keep_count=weekly_n,
+    )
+    monthly_keep = _select_bucket_keep_paths(
+        monthly_items,
+        bucket_key_fn=lambda dt: (dt.year, dt.month),
+        keep_count=monthly_n,
+    )
+
+    def _paths_to_delete(items, keep_set):
+        out = []
+        for item in items:
+            if item.get("isdir") == 1:
+                continue
+            name = item.get("server_filename") or ""
+            if not name.endswith(".tar"):
+                continue
+            path = item.get("path")
+            if path and path not in keep_set:
+                out.append(path)
+        return out
+
+    del_daily = _paths_to_delete(daily_items, daily_keep)
+    del_weekly = _paths_to_delete(weekly_items, weekly_keep)
+    del_monthly = _paths_to_delete(monthly_items, monthly_keep)
+
+    if del_daily:
+        log(f"Retention folders: deleting {len(del_daily)} backups from daily")
+        client.delete_remote_files(del_daily)
+    if del_weekly:
+        log(f"Retention folders: deleting {len(del_weekly)} backups from weekly")
+        client.delete_remote_files(del_weekly)
+    if del_monthly:
+        log(f"Retention folders: deleting {len(del_monthly)} backups from monthly")
+        client.delete_remote_files(del_monthly)
+
+
 def sync_all_backups(client, upload_path):
     """Sync all .tar files in BACKUP_DIR"""
     if not os.path.exists(BACKUP_DIR):
@@ -371,7 +779,7 @@ def parse_schedule_hour(schedule_str):
 
 def main():
     log("=" * 50)
-    log("Baidu Netdisk Backup Add-on v1.0.0 (OAuth 2.0)")
+    log("Baidu Netdisk Backup Add-on v1.0.1 (OAuth 2.0)")
     log("Using AList-compatible authentication method")
     log("Mode: Sync ALL backups")
     log("=" * 50)
@@ -389,6 +797,18 @@ def main():
     # CHANGE: Default path should not include /apps/ prefix as we are already inside the sandbox
     # Users should config: /HomeAssistant/Backup (which maps to /apps/AppName/HomeAssistant/Backup)
     upload_path = options.get("upload_path", "/HomeAssistant/Backup")
+
+    retention = options.get("retention")
+    if retention is None:
+        retention = {
+            "daily": options.get("retention_daily", 0),
+            "weekly": options.get("retention_weekly", 0),
+            "monthly": options.get("retention_monthly", 0)
+        }
+    retention_use_folders = bool(
+        (isinstance(retention, dict) and retention.get("use_folders"))
+        or options.get("retention_use_folders")
+    )
     
     schedule_str = options.get("schedule", "0 3 * * *")
     target_hour = parse_schedule_hour(schedule_str)
@@ -418,7 +838,19 @@ def main():
 
     # 2. Initial Sync
     log("Running initial sync...")
-    sync_all_backups(client, upload_path)
+    if retention_use_folders:
+        daily_dir = _join_remote_dir(upload_path, "daily")
+        sync_all_backups(client, daily_dir)
+        try:
+            retention_folder_mode(client, upload_path, retention)
+        except Exception as e:
+            log(f"Remote retention error: {e}")
+    else:
+        sync_all_backups(client, upload_path)
+        try:
+            cleanup_remote_backups(client, upload_path, retention)
+        except Exception as e:
+            log(f"Remote retention error: {e}")
 
     # 3. Loop
     log(f"Entering scheduled mode. Target hour: {target_hour}:00")
@@ -438,7 +870,13 @@ def main():
         # Re-check token before upload
         try:
             client._ensure_token()
-            sync_all_backups(client, upload_path)
+            if retention_use_folders:
+                daily_dir = _join_remote_dir(upload_path, "daily")
+                sync_all_backups(client, daily_dir)
+                retention_folder_mode(client, upload_path, retention)
+            else:
+                sync_all_backups(client, upload_path)
+                cleanup_remote_backups(client, upload_path, retention)
         except Exception as e:
             log(f"Scheduled upload error: {e}")
         
