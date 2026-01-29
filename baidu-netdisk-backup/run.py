@@ -810,7 +810,7 @@ def main():
         or options.get("retention_use_folders")
     )
     
-    schedule_str = options.get("schedule", "0 3 * * *")
+    schedule_str = options.get("schedule", "0 5 * * *")
     target_hour = parse_schedule_hour(schedule_str)
     
     if not refresh_token:
