@@ -1,12 +1,12 @@
 # 百度网盘备份 - Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)
+![Version](https://img.shields.io/badge/version-1.0.2-blue.svg)
 ![Auth](https://img.shields.io/badge/认证方式-OAuth_2.0-green.svg)
 ![Python](https://img.shields.io/badge/Python-3.11-yellow.svg)
 
 一个用于 Home Assistant 的 Supervisor 加载项 (Add-on)，可以自动将您的 HA 备份文件同步上传到百度网盘。
 
-> **v1.0.1 更新发布！**
+> **v1.0.2 更新发布！**
 >
 > 采用与 **AList** 完全相同的百度官方 OAuth 2.0 接口和 API 调用方式，稳定可靠。
 

@@ -1,5 +1,5 @@
 name: "百度网盘备份 (Baidu Netdisk Backup)"
-version: "1.0.1"
+version: "1.0.2"
 slug: "baidu_netdisk_backup"
 description: "自动将 Home Assistant 备份文件上传到百度网盘 (正式版)"
 url: "https://gitee.com/mxmaimooo/hassio-addon-baidunetdisk-backup"

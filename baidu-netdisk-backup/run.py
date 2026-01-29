@@ -782,7 +782,7 @@ def parse_schedule_hour(schedule_str):
 
 def main():
     log("=" * 50)
-    log("Baidu Netdisk Backup Add-on v1.0.1 (OAuth 2.0)")
+    log("Baidu Netdisk Backup Add-on v1.0.2 (OAuth 2.0)")
     log("Using AList-compatible authentication method")
     log("Mode: Sync ALL backups")
     log("=" * 50)

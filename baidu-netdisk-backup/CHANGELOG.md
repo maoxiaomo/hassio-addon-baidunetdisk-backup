@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2
+
+### 变更
+- Add-on 配置项补全：在 `config.yaml` 中暴露 `retention_use_folders` / `retention_daily` / `retention_weekly` / `retention_monthly`，并设置默认值（7/4/12）
+- 目录模式归档顺序调整：优先归档到 `monthly/`，再归档到 `weekly/`，避免只有一份备份时 `monthly/` 为空
+- 统一默认定时：`schedule` 默认值与配置/文档保持一致（`0 5 * * *`）
+
 ## 1.0.1
 
 ### 新增
