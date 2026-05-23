@@ -1,0 +1,169 @@
+# 百度网盘备份 - Home Assistant Add-on
+
+![Version](https://img.shields.io/badge/version-1.0.2-blue.svg)
+![Auth](https://img.shields.io/badge/认证方式-OAuth_2.0-green.svg)
+![Python](https://img.shields.io/badge/Python-3.11-yellow.svg)
+
+一个用于 Home Assistant 的 Supervisor 加载项 (Add-on)，可以自动将您的 HA 备份文件同步上传到百度网盘。
+
+> **v1.0.2 更新发布！**
+>
+> 采用与 **AList** 完全相同的百度官方 OAuth 2.0 接口和 API 调用方式，稳定可靠。
+
+---
+
+## ✨ 核心功能
+
+- **🚀 官方认证**：使用百度官方 OAuth 2.0 授权接口，稳定可靠，无封锁风险。
+- **🔄 自动续期**：内置 Token 自动刷新机制，一次登录，永久有效。
+- **⚡ 极速秒传**：利用百度网盘秒传机制，GB 级文件也能瞬间完成备份。
+- **📦 分片上传**：大文件自动分片上传，网络波动也能断点续传。
+- **⏰ 灵活定时**：支持 Cron 表达式配置，精确控制备份时间。
+- **🧹 分层保留**：支持远端备份分层保留策略（daily/weekly/monthly），自动清理旧备份，避免网盘容量持续增长。
+- **🗂️ 目录模式（可选）**：在 `upload_path` 下自动创建 `daily/`、`weekly/`、`monthly/` 三个目录并分类存放（通过移动归档，不重复占用空间）。
+
+---
+
+## 🛠️ 安装方法
+
+**地址**：https://gitee.com/mxmaimooo/hassio-addon-baidunetdisk-backup
+
+**Github源**：https://github.com/maoxiaomo/hassio-addon-baidunetdisk-backup
+
+### 🚀 一键安装（推荐）
+
+点击下方按钮，直接在 Home Assistant 中添加本插件（使用 Gitee 国内源）：
+
+[![Open your Home Assistant instance and show the add-on store.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgitee.com%2Fmxmaimooo%2Fhassio-addon-baidunetdisk-backup)
+
+### 手动安装
+1. 复制上面的 Gitee 地址。
+2. 进入 Home Assistant：**配置** > **加载项** > **加载项商店**。
+3. 点击右上角菜单（三个点） > **仓库**。
+4. 粘贴地址并点击 **添加**。
+5. 刷新页面，找到 **百度网盘备份** 并点击安装。
+
+---
+
+## 🔑 获取 Refresh Token（重要！）
+
+> 🛑 **操作前必读**：请严格按照以下顺序操作，否则可能导致授权失败。
+
+### 第一步：登录百度网盘
+请先在浏览器中打开 [百度网盘官网](https://pan.baidu.com) 并**登录您的百度账号**。
+*(建议使用 PC 端浏览器操作)*
+
+### 第二步：获取授权
+登录成功后，点击下方链接进行授权：
+
+👉 **[点击这里获取 Refresh Token](https://openapi.baidu.com/oauth/2.0/authorize?response_type=code&client_id=hq9yQ9w9kR4YHj1kyYafLygVocobh7Sf&redirect_uri=https://alistgo.com/tool/baidu/callback&scope=basic,netdisk&qrcode=1)**
+
+### 第三步：复制 Token
+授权页面会显示如下 JSON 信息，请复制 **`refresh_token`** 后面的字符串：
+
+```json
+{
+  "access_token": "121.xxxxxxxx...",
+  "refresh_token": "122.a0b1c2d3...",   <-- 复制这一长串字符
+  "expires_in": 2592000
+}
+```
+
+> **注意**：只复制 `122.` 开头的那一长串字符，不要包含引号。
+
+### 第四步：填入配置
+回到 Home Assistant Add-on 的 **配置** 页面，将复制的字符粘贴到 `refresh_token` 字段中。
+
+---
+
+## ⚙️ 配置说明
+
+| 配置项 | 必填 | 默认值 | 说明 |
+| :--- | :---: | :--- | :--- |
+| `refresh_token` | ✅ | (无) | **必填**。从上一步获取的令牌。 |
+| `upload_path` | ❌ | `/HomeAssistant/Backup` | 网盘中的目标文件夹路径。会自动创建。 |
+| `schedule` | ❌ | `0 5 * * *` | 定时任务的 Cron 表达式。 |
+| `retention.daily` | ❌ | (不启用) | 远端保留：按“天”保留最近 N 份（同一天多份只保留最新一份）。 |
+| `retention.weekly` | ❌ | (不启用) | 远端保留：按“周”保留最近 N 份（同一周只保留最新一份）。 |
+| `retention.monthly` | ❌ | (不启用) | 远端保留：按“月”保留最近 N 份（同一月只保留最新一份）。 |
+| `retention.use_folders` | ❌ | `false` | 是否启用目录模式。启用后会在 `upload_path` 下使用 `daily/weekly/monthly` 三个子目录。 |
+
+### 📝 配置示例
+
+```yaml
+refresh_token: "122.a0b1c2d3e4f5g6h7i8j9k0l1m2n3o4p5..."
+upload_path: "/HomeAssistant/Backup"
+schedule: "0 5 * * *"  # 每天凌晨5点执行
+
+# 远端分层保留（推荐：daily=7、weekly=4、monthly=12）
+retention:
+  daily: 7
+  weekly: 4
+  monthly: 12
+
+# 可选：开启目录模式（云端会使用 /HomeAssistant/Backup/daily|weekly|monthly 三个目录）
+  use_folders: true
+```
+
+### ⏰ Cron 表达式参考
+
+- `0 5 * * *` : 每天凌晨 5:00 (默认)
+- `30 2 * * *` : 每天凌晨 2:30
+- `0 */4 * * *` : 每 4 小时执行一次
+- `0 1 * * 1` : 每周一凌晨 1:00
+
+---
+
+## 📂 工作机制
+
+1. **启动检查**：插件启动时，会立即扫描 `/backup` 目录，并尝试上传**所有** `.tar` 备份文件。
+2. **定时轮询**：根据 `schedule` 设定的时间，定期唤醒并执行全量同步任务。
+3. **智能上传**：
+   - 上传前会自动计算文件 MD5。
+   - 如果网盘中已存在相同文件，则触发**秒传**，无需消耗流量。
+   - 只有新文件或未上传的文件才会进行实际传输。
+
+---
+
+## ❓ 常见问题 (FAQ)
+
+#### Q: 点击授权链接提示错误？
+**A:** 这通常是因为您没有先在浏览器中登录百度网盘。请先访问 pan.baidu.com 登录，然后再点击授权链接。
+
+#### Q: 备份文件在哪里？
+**A:** 默认情况下文件位于百度网盘的 **`/HomeAssistant/Backup`** 目录下。若开启目录模式（`retention.use_folders: true`），则会存放在：
+
+- `upload_path/daily/`
+- `upload_path/weekly/`
+- `upload_path/monthly/`
+
+#### Q: Token 会过期吗？需要定期更换吗？
+**A:** 不需要。插件内置了 Token 自动刷新机制，只要您不取消授权，Token 会一直自动续期。
+
+#### Q: 为什么日志显示 "Rapid upload (秒传) successful"？
+**A:** 这表示您的备份文件在百度网盘云端已经存在（可能是您手动上传过，或者之前的任务已经上传成功），因此插件跳过了实际传输，直接完成了"上传"。这是正常且高效的表现。
+
+#### Q: 本地删除了备份，网盘上也会删除吗？
+**A:** 分两种情况：
+
+- **未启用保留策略**（不配置 `retention.daily/weekly/monthly`）：网盘不会自动删除，表现为"只增不减"。
+- **启用保留策略**（配置了 `retention.daily/weekly/monthly`）：插件会在云端按保留规则自动清理旧备份。
+
+---
+
+## 🛠️ 技术栈与致谢
+
+本项目基于以下优秀的开源技术构建：
+
+- **Python 3**: 核心逻辑实现
+- **Requests**: 处理 HTTP 通讯与 API 交互
+- **Alpine Linux**: 提供超轻量级的 Docker 运行环境
+- **AList**: 感谢 [AList](https://github.com/alist-org/alist) 项目提供的百度网盘 OAuth 2.0 鉴权方案，极大地简化了开发流程。
+
+---
+
+## 问题反馈
+
+> ⚠️ **声明**：本项目目前处于**维护阶段**，遵循「能用就不改」原则。
+> 
+> 作者只会修复影响**自己使用**的问题，一切以个人利益为重。欢迎 Fork 自行修改。
