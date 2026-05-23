@@ -228,9 +228,9 @@ def retention_folder_mode(
     weekly_n = int(retention.get("weekly", 0) or 0)
     monthly_n = int(retention.get("monthly", 0) or 0)
 
-    daily_dir = _join_remote_dir(base_upload_path, "daily")
-    weekly_dir = _join_remote_dir(base_upload_path, "weekly")
-    monthly_dir = _join_remote_dir(base_upload_path, "monthly")
+    daily_dir = _join_remote_dir(base_upload_path, "每日")
+    weekly_dir = _join_remote_dir(base_upload_path, "每周")
+    monthly_dir = _join_remote_dir(base_upload_path, "每月")
 
     client.create_remote_dir(base_upload_path)
     client.create_remote_dir(daily_dir)
