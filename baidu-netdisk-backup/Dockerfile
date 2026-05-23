@@ -1,23 +1,18 @@
 ARG BUILD_FROM
-FROM alpine:3.19
+FROM ${BUILD_FROM}
 
-# 1. Change Alpine repo to Aliyun (HTTP) for reliability
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
-    && sed -i 's/https/http/g' /etc/apk/repositories
-
-# 2. Install Python3 and dependencies via APK
-# python3: Alpine's native python
-# py3-requests: pre-compiled requests library matching system python
-# ca-certificates: for SSL verification
-# tzdata: for timezone support
+# Install Python3 and dependencies via APK
 RUN apk add --no-cache \
     python3 \
     py3-requests \
     ca-certificates \
     tzdata
 
-# Copy run script
-COPY run.py /
+# Copy application modules
+COPY client.py /
+COPY retention.py /
+COPY sync.py /
+COPY main.py /
 
-# Run with python3 (which is now /usr/bin/python3 from apk)
-CMD [ "python3", "/run.py" ]
+# Start the add-on
+CMD [ "python3", "/main.py" ]

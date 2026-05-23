@@ -29,3 +29,9 @@ schema:
   retention_daily: int?
   retention_weekly: int?
   retention_monthly: int?
+  # Issue 7 / 20: add nested retention schema matching code's nested-first logic
+  retention:
+    daily: int?
+    weekly: int?
+    monthly: int?
+    use_folders: bool?
