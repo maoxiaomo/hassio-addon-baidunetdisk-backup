@@ -1,5 +1,5 @@
 name: "百度网盘备份 (Baidu Netdisk Backup)"
-version: "1.0.2"
+version: "1.0.3"
 slug: "baidu_netdisk_backup"
 description: "自动将 Home Assistant 备份文件上传到百度网盘 (正式版)"
 url: "https://gitee.com/mxmaimooo/hassio-addon-baidunetdisk-backup"
@@ -21,6 +21,37 @@ options:
   retention_daily: 7
   retention_weekly: 4
   retention_monthly: 12
+  # 通知配置 — 下方提供默认占位，实际值请按需填写
+  notifications:
+    enabled: true
+    events:
+      backup_success: true
+      backup_failure: true
+      migration_done: true
+      manifest_generated: false
+      storage_warning: true
+    channels:
+      email:
+        enabled: false
+        smtp_host: ""
+        smtp_port: 587
+        username: ""
+        password: ""
+        to_emails: ""
+        use_ssl: false
+      wechat:
+        enabled: false
+        webhook_key: ""                # 企业微信群机器人 Webhook Key
+      dingtalk:
+        enabled: false
+        webhook_url: ""                # 钉钉群机器人 Webhook 完整 URL
+        secret: ""                     # 加签密钥（可选）
+        at_all: false
+        at_mobiles: []
+      feishu:
+        enabled: false
+        webhook_url: ""                # 飞书群机器人 Webhook 完整 URL
+        secret: ""                     # 签名校验密钥（可选）
 schema:
   refresh_token: str
   upload_path: str?
@@ -35,3 +66,35 @@ schema:
     weekly: int?
     monthly: int?
     use_folders: bool?
+  # 通知配置 schema（v1.0.3）
+  notifications:
+    enabled: bool?
+    events:
+      backup_success: bool?
+      backup_failure: bool?
+      migration_done: bool?
+      manifest_generated: bool?
+      storage_warning: bool?
+    channels:
+      email:
+        enabled: bool?
+        smtp_host: str?
+        smtp_port: int?
+        username: str?
+        password: str?
+        to_emails: str?
+        use_ssl: bool?
+      wechat:
+        enabled: bool?
+        webhook_key: str?
+      dingtalk:
+        enabled: bool?
+        webhook_url: str?
+        secret: str?
+        at_all: bool?
+        at_mobiles:
+          - str?
+      feishu:
+        enabled: bool?
+        webhook_url: str?
+        secret: str?

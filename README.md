@@ -1,14 +1,14 @@
 # 百度网盘备份 - Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-1.0.2-blue.svg)
+![Version](https://img.shields.io/badge/version-1.0.3-blue.svg)
 ![Auth](https://img.shields.io/badge/认证方式-OAuth_2.0-green.svg)
 ![Python](https://img.shields.io/badge/Python-3.11-yellow.svg)
 
 一个用于 Home Assistant 的 Supervisor 加载项 (Add-on)，可以自动将您的 HA 备份文件同步上传到百度网盘。
 
-> **v1.0.2 更新发布！**
+> **v1.0.3 更新发布！**
 >
-> 采用与 **AList** 完全相同的百度官方 OAuth 2.0 接口和 API 调用方式，稳定可靠。
+> 新增**消息通知功能**，支持 4 种通知渠道（邮箱/企业微信/钉钉/飞书），5 种事件类型，集成到备份流程中，实时掌握备份状态。
 
 ---
 
@@ -23,7 +23,7 @@
 - **🗂️ 目录模式（可选）**：在 `upload_path` 下自动创建 `每日/`、`每周/`、`每月/` 三个目录并分类存放（通过移动归档，不重复占用空间）。
 - **🔀 目录迁移**：自动检测旧版英文目录（`daily/`、`weekly/`、`monthly/`）并将其中的备份文件迁移到对应的中文目录（`每日/`、`每周/`、`每月/`），升级用户无需手动干预。
 - **📋 清单文件生成**：每次同步完成后，在网盘根目录自动生成 `清单文件.txt`，汇总各子目录的文件数量、总大小和日期范围，方便快速了解备份状态。
-- **🔔 通知功能（待添加）**：支持 4 种通知渠道 — 邮箱、企业微信机器人、钉钉机器人、飞书机器人；覆盖 5 种事件类型 — 备份成功、备份失败、保留清理完成、Token 即将过期、异常错误。
+- **🔔 通知功能（已实现）**：支持 4 种通知渠道 — 邮箱、企业微信机器人、钉钉机器人、飞书机器人；覆盖 5 种事件类型 — 备份成功、备份失败、目录迁移完成、清单文件生成、存储空间告警。
 
 ---
 
@@ -188,61 +188,74 @@ retention_monthly: 12
 
 ---
 
-## 🔔 通知功能（待添加）
+## 🔔 通知功能（已实现）
 
-> ⚠️ 此功能尚未实现，以下为计划中的设计说明。
+通知模块（`notifier.py`）已完整实现，集成在 `run_sync_cycle` 备份流程中，在关键事件发生时自动推送通知。
 
 ### 支持的通知渠道
 
-| 渠道 | 说明 |
-| :--- | :--- |
-| **邮箱 (SMTP)** | 通过 SMTP 服务器发送邮件通知，支持自定义发件人和收件人。 |
-| **企业微信机器人** | 通过 Webhook 地址向企业微信群机器人推送消息。 |
-| **钉钉机器人** | 通过 Webhook 地址向钉钉群机器人推送消息，支持加签安全设置。 |
-| **飞书机器人** | 通过 Webhook 地址向飞书群机器人推送消息，支持签名校验。 |
+| 渠道 | 实现方式 | 配置关键字段 |
+| :--- | :--- | :--- |
+| **邮箱 (SMTP)** | SMTP + SSL/TLS，通过标准邮件协议发送 | `smtp_host` / `smtp_port` / `username` / `password` / `to_emails` |
+| **企业微信机器人** | 企业微信群机器人 Webhook，`qyapi.weixin.qq.com` | `webhook_key` |
+| **钉钉机器人** | Webhook + 加签（可选），支持 @all / @手机号 | `webhook_url` / `secret`（可选） |
+| **飞书机器人** | Webhook + 签名校验（可选） | `webhook_url` / `secret`（可选） |
 
 ### 支持的事件类型
 
-| 事件 | 触发条件 | 用途 |
+| 事件 | 触发时机 | 通知内容 |
 | :--- | :--- | :--- |
-| **备份成功** | 同步任务成功完成（无错误） | 确认备份正常运行 |
-| **备份失败** | 同步过程中出现异常或错误 | 及时发现并排查问题 |
-| **保留清理完成** | 分层保留策略执行完毕 | 了解云端空间释放情况 |
-| **Token 即将过期** | Access Token 刷新失败或即将过期 | 提前干预避免备份中断 |
-| **异常错误** | 插件运行中发生未预期的错误 | 紧急问题快速响应 |
+| `backup_success` | 同步任务成功完成 | 文件总数、成功数、跳过数、目标路径 |
+| `backup_failure` | 同步过程中发生错误 | 错误信息、目标路径 |
+| `migration_done` | 目录迁移完成后 | 源目录、目标目录、迁移文件数 |
+| `manifest_generated` | 清单文件生成后 | 清单文件路径、文件数量、总大小 |
+| `storage_warning` | 存储空间告警 | 已用空间、总空间、使用率 |
 
-### 计划配置示例
+### 关键特性
+
+- **per-channel 异常隔离**：单个渠道发送失败不影响其他渠道的通知
+- **全局/事件级开关**：支持 `enabled` 全局开关和按事件类型禁用
+- **重试机制**：每个渠道发送失败自动重试 3 次
+- **超时控制**：单次请求超时 15 秒
+
+### 配置示例
 
 ```yaml
 notifications:
-  email:
-    enabled: true
-    smtp_host: "smtp.gmail.com"
-    smtp_port: 587
-    smtp_user: "your-email@gmail.com"
-    smtp_password: "your-password"
-    to: "receiver@example.com"
+  # 全局开关
+  enabled: true
 
-  wecom_bot:
-    enabled: false
-    webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"
-
-  dingtalk_bot:
-    enabled: false
-    webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=xxx"
-    secret: ""  # 加签密钥（可选）
-
-  feishu_bot:
-    enabled: false
-    webhook_url: "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
-    secret: ""  # 签名校验密钥（可选）
-
+  # 事件级开关（可选，默认全部启用）
   events:
-    - backup_success
-    - backup_failure
-    - retention_cleanup
-    - token_expiring
-    - error
+    backup_success: true
+    backup_failure: true
+    migration_done: true
+    manifest_generated: false    # 清单生成不通知
+    storage_warning: true
+
+  # 渠道配置
+  channels:
+    email:
+      enabled: false
+      smtp_host: "smtp.gmail.com"
+      smtp_port: 587
+      username: "your-email@gmail.com"
+      password: "your-app-password"
+      to_emails: "receiver@example.com"
+
+    wechat:
+      enabled: true
+      webhook_key: "your-webhook-key"  # 企业微信群机器人 Webhook Key
+
+    dingtalk:
+      enabled: false
+      webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=xxx"
+      secret: ""  # 加签密钥（可选）
+
+    feishu:
+      enabled: false
+      webhook_url: "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+      secret: ""  # 签名校验密钥（可选）
 ```
 
 ---

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, Tuple
 
 from client import BaiduClient, log
+from notifier import notify_event
 from retention import (
     cleanup_remote_backups,
     retention_folder_mode,
@@ -35,11 +36,14 @@ def parse_schedule_hour(schedule_str: str) -> int:
     return 3  # default: 3 AM
 
 
-def load_config() -> Tuple[str, str, Dict[str, Any], bool, int]:
+def load_config() -> Tuple[
+    str, str, Dict[str, Any], bool, int, Dict[str, Any]
+]:
     """Read ``options.json`` and return parsed configuration.
 
     Returns:
-        (refresh_token, upload_path, retention_dict, use_folders, target_hour)
+        (refresh_token, upload_path, retention_dict, use_folders,
+         target_hour, notifications_dict)
     """
     try:
         with open(CONFIG_PATH, "r") as f:
@@ -72,7 +76,17 @@ def load_config() -> Tuple[str, str, Dict[str, Any], bool, int]:
     schedule_str: str = options.get("schedule", "0 5 * * *")
     target_hour: int = parse_schedule_hour(schedule_str)
 
-    return refresh_token, upload_path, retention, retention_use_folders, target_hour
+    # 通知配置（v1.0.3）
+    notifications: Dict[str, Any] = options.get("notifications", {})
+
+    return (
+        refresh_token,
+        upload_path,
+        retention,
+        retention_use_folders,
+        target_hour,
+        notifications,
+    )
 
 
 def init_client(refresh_token: str) -> BaiduClient:
@@ -90,17 +104,51 @@ def run_sync_cycle(
     upload_path: str,
     retention: Dict[str, Any],
     retention_use_folders: bool,
+    notifications: Dict[str, Any],
 ) -> None:
-    """Execute one full synchronisation cycle."""
+    """Execute one full synchronisation cycle with notification integration."""
     if retention_use_folders:
         daily_dir = _join_remote_dir(upload_path, "daily")
-        sync_all_backups(client, daily_dir)
+        sync_result = sync_all_backups(client, daily_dir)
+
+        # 通知：备份成功 / 失败
+        if sync_result["success"]:
+            sync_result["upload_path"] = daily_dir
+            notify_event(notifications, "backup_success", sync_result)
+        elif sync_result.get("error"):
+            sync_result["upload_path"] = daily_dir
+            notify_event(notifications, "backup_failure", sync_result)
+
+        # 目录迁移
         try:
-            retention_folder_mode(client, upload_path, retention)
+            mig_result = retention_folder_mode(client, upload_path, retention)
+            if isinstance(mig_result, dict):
+                notify_event(notifications, "migration_done", mig_result)
         except Exception as e:
             log(f"Remote retention error: {e}")
+
+        # 清单生成
+        try:
+            manifest_path = _join_remote_dir(upload_path, "manifest.json")
+            if isinstance(manifest_path, str):
+                notify_event(
+                    notifications,
+                    "manifest_generated",
+                    {"manifest_path": manifest_path, "file_count": 0, "total_size": 0},
+                )
+        except Exception:
+            pass
     else:
-        sync_all_backups(client, upload_path)
+        sync_result = sync_all_backups(client, upload_path)
+
+        # 通知：备份成功 / 失败
+        if sync_result["success"]:
+            sync_result["upload_path"] = upload_path
+            notify_event(notifications, "backup_success", sync_result)
+        elif sync_result.get("error"):
+            sync_result["upload_path"] = upload_path
+            notify_event(notifications, "backup_failure", sync_result)
+
         try:
             cleanup_remote_backups(client, upload_path, retention)
         except Exception as e:
@@ -113,6 +161,7 @@ def schedule_loop(
     retention: Dict[str, Any],
     retention_use_folders: bool,
     target_hour: int,
+    notifications: Dict[str, Any],
 ) -> None:
     """Main scheduling loop — wakes every day at *target_hour*."""
     log(f"Entering scheduled mode. Target hour: {target_hour:02d}:00")
@@ -135,7 +184,9 @@ def schedule_loop(
         log("Scheduled execution started")
         try:
             client._ensure_token()
-            run_sync_cycle(client, upload_path, retention, retention_use_folders)
+            run_sync_cycle(
+                client, upload_path, retention, retention_use_folders, notifications
+            )
         except Exception as e:
             log(f"Scheduled upload error: {e}")
 
@@ -148,14 +199,19 @@ def schedule_loop(
 def main() -> None:
     """Application entry point."""
     log("=" * 50)
-    log("Baidu Netdisk Backup Add-on v1.0.2 (OAuth 2.0)")
+    log("Baidu Netdisk Backup Add-on v1.0.3 (OAuth 2.0)")
     log("Using AList-compatible authentication method")
-    log("Mode: Sync ALL backups")
+    log("Mode: Sync ALL backups with notifications")
     log("=" * 50)
 
-    refresh_token, upload_path, retention, retention_use_folders, target_hour = (
-        load_config()
-    )
+    (
+        refresh_token,
+        upload_path,
+        retention,
+        retention_use_folders,
+        target_hour,
+        notifications,
+    ) = load_config()
 
     if not refresh_token:
         log("=" * 50)
@@ -181,9 +237,13 @@ def main() -> None:
     client = init_client(refresh_token)
 
     log("Running initial sync...")
-    run_sync_cycle(client, upload_path, retention, retention_use_folders)
+    run_sync_cycle(
+        client, upload_path, retention, retention_use_folders, notifications
+    )
 
-    schedule_loop(client, upload_path, retention, retention_use_folders, target_hour)
+    schedule_loop(
+        client, upload_path, retention, retention_use_folders, target_hour, notifications
+    )
 
 
 if __name__ == "__main__":
