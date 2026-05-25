@@ -17,6 +17,8 @@ options:
   refresh_token: ""
   upload_path: "/HomeAssistant/Backup"
   schedule: "0 5 * * *"
+  # 推荐使用下方嵌套 retention 块；顶层 retention_xxx 字段为向后兼容字段，
+  # 若与嵌套块同时配置，嵌套块优先生效
   retention_use_folders: false
   retention_daily: 7
   retention_weekly: 4

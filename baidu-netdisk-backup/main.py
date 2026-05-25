@@ -2,7 +2,6 @@
 """Entry point & scheduling loop for the Baidu Netdisk Backup add-on."""
 import json
 import os
-import sys
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, Tuple
@@ -11,6 +10,8 @@ from client import BaiduClient, log
 from notifier import notify_event
 from retention import (
     cleanup_remote_backups,
+    generate_manifest,
+    migrate_old_dirs,
     retention_folder_mode,
     _join_remote_dir,
 )
@@ -20,30 +21,102 @@ CONFIG_PATH: str = "/data/options.json"
 
 
 # ============================================================================
-# Config & helpers  (Issue 14: extracted from main())
+# Cron 解析（5 字段：min hour dom mon dow）
 # ============================================================================
-def parse_schedule_hour(schedule_str: str) -> int:
-    """Extract the hour from a cron-like schedule string.
+class CronSchedule:
+    """支持 `*`、`N`、`N-M`、`N-M/S`、`*/S`、`N,M,...` 的最小 cron 解析器。
 
-    Issue 3 fix: narrow ``except`` to expected types only.
+    dow / dom 使用经典 cron 的"OR"语义：仅当两者都不是 `*` 时取并集；都是 `*`
+    时为 AND（即不限制）。dow 0=Sunday，与 crontab(5) 一致。
     """
+
+    _FIELD_RANGES = [
+        (0, 59),   # minute
+        (0, 23),   # hour
+        (1, 31),   # day-of-month
+        (1, 12),   # month
+        (0, 6),    # day-of-week (0=Sunday)
+    ]
+
+    def __init__(self, expr: str) -> None:
+        self.expr: str = expr
+        parts = expr.split()
+        if len(parts) != 5:
+            raise ValueError(f"cron expression must have 5 fields, got: {expr!r}")
+        self.fields = [
+            self._parse_field(parts[i], *self._FIELD_RANGES[i])
+            for i in range(5)
+        ]
+        self.minute_set, self.hour_set, self.dom_set, self.mon_set, self.dow_set = (
+            self.fields
+        )
+        self.dom_restricted: bool = parts[2] != "*"
+        self.dow_restricted: bool = parts[4] != "*"
+
+    @staticmethod
+    def _parse_field(spec: str, lo: int, hi: int) -> set:
+        out: set = set()
+        for token in spec.split(","):
+            step = 1
+            if "/" in token:
+                token, step_s = token.split("/", 1)
+                step = int(step_s)
+                if step <= 0:
+                    raise ValueError(f"invalid step in cron field: {spec!r}")
+            if token == "*":
+                start, end = lo, hi
+            elif "-" in token:
+                a, b = token.split("-", 1)
+                start, end = int(a), int(b)
+            else:
+                start = end = int(token)
+            if start < lo or end > hi or start > end:
+                raise ValueError(
+                    f"cron field {spec!r} out of range [{lo},{hi}]"
+                )
+            out.update(range(start, end + 1, step))
+        return out
+
+    def matches(self, dt: datetime) -> bool:
+        # cron 中 weekday 0 / 7 都表示周日；Python weekday(): Mon=0..Sun=6
+        cron_dow = (dt.weekday() + 1) % 7  # → Sun=0..Sat=6
+        if dt.minute not in self.minute_set:
+            return False
+        if dt.hour not in self.hour_set:
+            return False
+        if dt.month not in self.mon_set:
+            return False
+        dom_ok = dt.day in self.dom_set
+        dow_ok = cron_dow in self.dow_set
+        if self.dom_restricted and self.dow_restricted:
+            return dom_ok or dow_ok
+        return dom_ok and dow_ok
+
+    def next_fire(self, now: datetime) -> datetime:
+        # 从 now+1min 起按分钟扫描；上限 4 年防止表达式无解时死循环
+        t = (now + timedelta(minutes=1)).replace(second=0, microsecond=0)
+        limit = t + timedelta(days=366 * 4)
+        while t < limit:
+            if self.matches(t):
+                return t
+            t += timedelta(minutes=1)
+        raise ValueError(f"cron expression has no firing within 4 years: {self.expr!r}")
+
+
+def parse_cron(schedule_str: str) -> CronSchedule:
+    """解析 cron；解析失败时回退到默认 `0 5 * * *` 并打日志。"""
     try:
-        parts = schedule_str.split()
-        if len(parts) >= 2:
-            return int(parts[1])
-    except (ValueError, IndexError, AttributeError):
-        pass
-    return 3  # default: 3 AM
+        return CronSchedule(schedule_str)
+    except (ValueError, IndexError, AttributeError, TypeError) as e:
+        log(f"Invalid cron expression {schedule_str!r}: {e}. Falling back to '0 5 * * *'.")
+        return CronSchedule("0 5 * * *")
 
 
-def load_config() -> Tuple[
-    str, str, Dict[str, Any], bool, int, Dict[str, Any]
-]:
+def load_config() -> Tuple[str, str, Dict[str, Any], bool, CronSchedule, Dict[str, Any]]:
     """Read ``options.json`` and return parsed configuration.
 
     Returns:
-        (refresh_token, upload_path, retention_dict, use_folders,
-         target_hour, notifications_dict)
+        (refresh_token, upload_path, retention_dict, use_folders, cron, notifications)
     """
     try:
         with open(CONFIG_PATH, "r") as f:
@@ -74,19 +147,12 @@ def load_config() -> Tuple[
     )
 
     schedule_str: str = options.get("schedule", "0 5 * * *")
-    target_hour: int = parse_schedule_hour(schedule_str)
+    cron = parse_cron(schedule_str)
 
     # 通知配置（v1.0.3）
     notifications: Dict[str, Any] = options.get("notifications", {})
 
-    return (
-        refresh_token,
-        upload_path,
-        retention,
-        retention_use_folders,
-        target_hour,
-        notifications,
-    )
+    return refresh_token, upload_path, retention, retention_use_folders, cron, notifications
 
 
 def init_client(refresh_token: str) -> BaiduClient:
@@ -108,7 +174,7 @@ def run_sync_cycle(
 ) -> None:
     """Execute one full synchronisation cycle with notification integration."""
     if retention_use_folders:
-        daily_dir = _join_remote_dir(upload_path, "daily")
+        daily_dir = _join_remote_dir(upload_path, "每日")
         sync_result = sync_all_backups(client, daily_dir)
 
         # 通知：备份成功 / 失败
@@ -119,25 +185,18 @@ def run_sync_cycle(
             sync_result["upload_path"] = daily_dir
             notify_event(notifications, "backup_failure", sync_result)
 
-        # 目录迁移
         try:
-            mig_result = retention_folder_mode(client, upload_path, retention)
-            if isinstance(mig_result, dict):
-                notify_event(notifications, "migration_done", mig_result)
+            # 迁移旧英文目录到新中文目录（仅首次执行）
+            migrate_old_dirs(client, upload_path)
+            retention_folder_mode(client, upload_path, retention)
         except Exception as e:
             log(f"Remote retention error: {e}")
 
-        # 清单生成
+        # 每次 retention 完成后生成备份清单文件
         try:
-            manifest_path = _join_remote_dir(upload_path, "manifest.json")
-            if isinstance(manifest_path, str):
-                notify_event(
-                    notifications,
-                    "manifest_generated",
-                    {"manifest_path": manifest_path, "file_count": 0, "total_size": 0},
-                )
-        except Exception:
-            pass
+            generate_manifest(client, upload_path)
+        except Exception as e:
+            log(f"Generate manifest error: {e}")
     else:
         sync_result = sync_all_backups(client, upload_path)
 
@@ -160,36 +219,30 @@ def schedule_loop(
     upload_path: str,
     retention: Dict[str, Any],
     retention_use_folders: bool,
-    target_hour: int,
+    cron: CronSchedule,
     notifications: Dict[str, Any],
 ) -> None:
-    """Main scheduling loop — wakes every day at *target_hour*."""
-    log(f"Entering scheduled mode. Target hour: {target_hour:02d}:00")
+    """Main scheduling loop — wakes at every cron-matched minute."""
+    log(f"Entering scheduled mode. Cron: {cron.expr!r}")
 
     while True:
         now = datetime.now()
-        target = now.replace(
-            hour=target_hour, minute=0, second=0, microsecond=0
-        )
-        if target <= now:
-            target += timedelta(days=1)
+        target = cron.next_fire(now)
 
         seconds_to_wait = (target - now).total_seconds()
         log(
             f"Next run: {target.strftime('%Y-%m-%d %H:%M')} "
-            f"(in {seconds_to_wait / 3600:.1f}h)"
+            f"(in {seconds_to_wait / 3600:.2f}h)"
         )
-        time.sleep(seconds_to_wait)
+        time.sleep(max(seconds_to_wait, 1))
 
         log("Scheduled execution started")
         try:
-            client._ensure_token()
-            run_sync_cycle(
-                client, upload_path, retention, retention_use_folders, notifications
-            )
+            run_sync_cycle(client, upload_path, retention, retention_use_folders, notifications)
         except Exception as e:
             log(f"Scheduled upload error: {e}")
 
+        # 防止同一分钟内重入（next_fire 从 now+1min 起算，仍兜底 sleep 60s）
         time.sleep(60)
 
 
@@ -204,14 +257,9 @@ def main() -> None:
     log("Mode: Sync ALL backups with notifications")
     log("=" * 50)
 
-    (
-        refresh_token,
-        upload_path,
-        retention,
-        retention_use_folders,
-        target_hour,
-        notifications,
-    ) = load_config()
+    refresh_token, upload_path, retention, retention_use_folders, cron, notifications = (
+        load_config()
+    )
 
     if not refresh_token:
         log("=" * 50)
@@ -237,13 +285,9 @@ def main() -> None:
     client = init_client(refresh_token)
 
     log("Running initial sync...")
-    run_sync_cycle(
-        client, upload_path, retention, retention_use_folders, notifications
-    )
+    run_sync_cycle(client, upload_path, retention, retention_use_folders, notifications)
 
-    schedule_loop(
-        client, upload_path, retention, retention_use_folders, target_hour, notifications
-    )
+    schedule_loop(client, upload_path, retention, retention_use_folders, cron, notifications)
 
 
 if __name__ == "__main__":

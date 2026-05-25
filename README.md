@@ -2,7 +2,7 @@
 
 ![Version](https://img.shields.io/badge/version-1.0.3-blue.svg)
 ![Auth](https://img.shields.io/badge/认证方式-OAuth_2.0-green.svg)
-![Python](https://img.shields.io/badge/Python-3.11-yellow.svg)
+![Python](https://img.shields.io/badge/Python-3.x-yellow.svg)
 
 一个用于 Home Assistant 的 Supervisor 加载项 (Add-on)，可以自动将您的 HA 备份文件同步上传到百度网盘。
 
@@ -17,7 +17,7 @@
 - **🚀 官方认证**：使用百度官方 OAuth 2.0 授权接口，稳定可靠，无封锁风险。
 - **🔄 自动续期**：内置 Token 自动刷新机制，一次登录，永久有效。
 - **⚡ 极速秒传**：利用百度网盘秒传机制，GB 级文件也能瞬间完成备份。
-- **📦 分片上传**：大文件自动分片上传，网络波动也能断点续传。
+- **📦 分片上传**：大文件自动分片上传，单分片失败自动重试（最多 3 次）。
 - **⏰ 灵活定时**：支持 Cron 表达式配置，精确控制备份时间。
 - **🧹 分层保留**：支持远端备份分层保留策略（按日/周/月），自动清理旧备份，避免网盘容量持续增长。
 - **🗂️ 目录模式（可选）**：在 `upload_path` 下自动创建 `每日/`、`每周/`、`每月/` 三个目录并分类存放（通过移动归档，不重复占用空间）。
@@ -81,14 +81,16 @@
 
 ## ⚙️ 配置说明
 
+> 💡 **推荐使用嵌套 `retention:` 块配置保留策略**。顶层 `retention_daily` / `retention_weekly` / `retention_monthly` / `retention_use_folders` 仅作为向后兼容字段保留；如同时配置了两套，**嵌套 `retention:` 块优先生效**，顶层字段会被静默忽略。
+
 | 配置项 | 必填 | 默认值 | 说明 |
 | :--- | :---: | :--- | :--- |
 | `refresh_token` | ✅ | (无) | **必填**。从上一步获取的令牌。 |
 | `upload_path` | ❌ | `/HomeAssistant/Backup` | 网盘中的目标文件夹路径。会自动创建。 |
 | `schedule` | ❌ | `0 5 * * *` | 定时任务的 Cron 表达式。 |
-| `retention.daily` | ❌ | (不启用) | 远端保留：按"天"保留最近 N 份（同一天多份只保留最新一份）。 |
-| `retention.weekly` | ❌ | (不启用) | 远端保留：按"周"保留最近 N 份（同一周只保留最新一份）。 |
-| `retention.monthly` | ❌ | (不启用) | 远端保留：按"月"保留最近 N 份（同一月只保留最新一份）。 |
+| `retention.daily` | ❌ | (不启用) | 远端保留：按”天”保留最近 N 份（同一天多份只保留最新一份）。 |
+| `retention.weekly` | ❌ | (不启用) | 远端保留：按”周”保留最近 N 份（同一周只保留最新一份）。 |
+| `retention.monthly` | ❌ | (不启用) | 远端保留：按”月”保留最近 N 份（同一月只保留最新一份）。 |
 | `retention.use_folders` | ❌ | `false` | 是否启用目录模式。启用后会在 `upload_path` 下使用 `每日/`、`每周/`、`每月/` 三个中文子目录。**首次启用时会自动将旧版英文目录（`daily/`、`weekly/`、`monthly/`）中的文件迁移到新目录**。 |
 | `retention_use_folders` | ❌ | `false` | （扁平配置方式）同 `retention.use_folders`，二选一即可。 |
 | `retention_daily` | ❌ | `7` | （扁平配置方式）同 `retention.daily`。 |
@@ -258,6 +260,8 @@ notifications:
       secret: ""  # 签名校验密钥（可选）
 ```
 
+> ⚠️ **注意**：插件本地维护一份上传缓存（`/data/upload_cache.json`），用于避免重复上传。如果你**手动在百度网盘删除**了某个备份，插件不会自动重新上传。若需让插件重传，请删除 `/data/upload_cache.json` 或停用并重新启用 add-on。
+
 ---
 
 ## ❓ 常见问题 (FAQ)
@@ -271,7 +275,6 @@ notifications:
 - `upload_path/每日/`
 - `upload_path/每周/`
 - `upload_path/每月/`
-
 #### Q: 我之前用的是英文目录（daily/weekly/monthly），升级后怎么办？
 **A:** 无需手动操作。启用目录模式后，插件首次运行时会**自动检测**旧版英文目录，并将其中所有备份文件迁移到对应的中文目录。迁移通过**移动**操作完成，不会重复占用网盘空间，迁移完成后旧目录会被自动删除。
 
