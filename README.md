@@ -29,15 +29,9 @@
 
 ## 🛠️ 安装方法
 
-**地址**：https://gitee.com/mxmaimooo/hassio-addon-baidunetdisk-backup
+**地址**：http://192.168.123.254:8418/gitea/hassio-addon-baidunetdisk-backup-master
 
-**Github源**：https://github.com/maoxiaomo/hassio-addon-baidunetdisk-backup
-
-### 🚀 一键安装（推荐）
-
-点击下方按钮，直接在 Home Assistant 中添加本插件（使用 Gitee 国内源）：
-
-[![Open your Home Assistant instance and show the add-on store.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgitee.com%2Fmxmaimooo%2Fhassio-addon-baidunetdisk-backup)
+### 🚀 手动安装
 
 ### 手动安装
 1. 复制上面的 Gitee 地址。
