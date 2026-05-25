@@ -12,6 +12,7 @@ RUN apk add --no-cache \
 COPY client.py /
 COPY retention.py /
 COPY sync.py /
+COPY notifier.py /
 COPY main.py /
 
 # Start the add-on

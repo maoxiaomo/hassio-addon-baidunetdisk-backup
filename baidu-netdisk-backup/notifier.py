@@ -14,6 +14,7 @@
     - 重试机制（3 次，间隔 2 秒）
     - 超时 15 秒
 """
+import base64
 import hashlib
 import hmac
 import json
@@ -320,7 +321,7 @@ def _send_feishu(config: Dict[str, Any], title: str, content: str) -> bool:
             string_to_sign.encode("utf-8"),
             digestmod=hashlib.sha256,
         ).digest()
-        sign = hmac_code.hex() if isinstance(hmac_code, bytes) else hmac_code
+        sign = base64.b64encode(hmac_code).decode("utf-8")
         payload["timestamp"] = timestamp
         payload["sign"] = sign
 
@@ -466,14 +467,14 @@ def test_notification(channel: str, config: Dict[str, Any]) -> bool:
 
 
 def notify_event(
-    client_config: Dict[str, Any],
+    notifications: Dict[str, Any],
     event_type: str,
     event_data: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """统一通知入口 — 遍历所有已启用的通知渠道，向每个渠道发送事件通知。
 
     配置结构：
-        client_config["notifications"] = {
+        notifications = {
             "enabled": True,           # 全局开关
             "events": {                # 事件级开关
                 "backup_success": True,
@@ -491,17 +492,17 @@ def notify_event(
         }
 
     Args:
-        client_config: 完整客户端配置（含 notifications 段）
+        notifications: notifications 配置段
         event_type: 事件类型
         event_data: 事件数据
 
     Returns:
         {"sent": int, "failed": int, "skipped": int, "results": dict}
     """
-    notif = client_config.get("notifications")
-    if not isinstance(notif, dict):
+    if not isinstance(notifications, dict):
         _log("通知配置缺失，跳过通知发送")
         return {"sent": 0, "failed": 0, "skipped": 0, "results": {}}
+    notif = notifications
 
     # 全局开关
     if not notif.get("enabled", True):
