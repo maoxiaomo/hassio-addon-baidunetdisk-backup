@@ -8,6 +8,11 @@ RUN apk add --no-cache \
     ca-certificates \
     tzdata
 
+# 设置时区为东八区（北京时间）
+ENV TZ=Asia/Shanghai
+RUN cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    echo "Asia/Shanghai" > /etc/timezone
+
 # Copy application modules
 COPY client.py /
 COPY retention.py /
