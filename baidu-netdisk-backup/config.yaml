@@ -1,5 +1,5 @@
 name: "百度网盘备份 (Baidu Netdisk Backup)"
-version: "1.0.5"
+version: "1.0.7"
 slug: "baidu_netdisk_backup"
 description: "自动将 Home Assistant 备份文件上传到百度网盘 (正式版)"
 url: "https://gitee.com/mxmaimooo/hassio-addon-baidunetdisk-backup"
@@ -62,12 +62,7 @@ schema:
   retention_daily: int?
   retention_weekly: int?
   retention_monthly: int?
-  # Issue 7 / 20: add nested retention schema matching code's nested-first logic
-  retention:
-    daily: int?
-    weekly: int?
-    monthly: int?
-    use_folders: bool?
+  # Issue 7 / 20: 嵌套 retention 改为顶层扁平字段已覆盖，移除嵌套 schema 避免必填校验失败
   # 通知配置 schema（v1.0.3）
   notifications:
     enabled: bool?
