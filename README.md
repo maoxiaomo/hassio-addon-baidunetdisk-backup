@@ -1,14 +1,14 @@
 # 百度网盘备份 - Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-1.0.5-blue.svg)
+![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
 ![Auth](https://img.shields.io/badge/认证方式-OAuth_2.0-green.svg)
 ![Python](https://img.shields.io/badge/Python-3.x-yellow.svg)
 
 一个用于 Home Assistant 的 Supervisor 加载项 (Add-on)，可以自动将您的 HA 备份文件同步上传到百度网盘。
 
-> **v1.0.5 更新发布！**
+> **v1.1.0 更新发布！**
 >
-> 修复钉钉加签算法错误、优化通知重试机制、改进空备份目录处理逻辑。
+> 移除扁平配置方式，统一使用嵌套 `retention:` 块；默认开启目录模式。**老用户需手动迁移配置**（详见 CHANGELOG）。
 
 ---
 
@@ -82,27 +82,20 @@
 
 ## ⚙️ 配置说明
 
-> 💡 **推荐使用嵌套 `retention:` 块配置保留策略**。顶层 `retention_daily` / `retention_weekly` / `retention_monthly` / `retention_use_folders` 仅作为向后兼容字段保留；如同时配置了两套，**嵌套 `retention:` 块优先生效**，顶层字段会被静默忽略。
+> 💡 **v1.1.0 起仅支持嵌套 `retention:` 块配置**。扁平字段 `retention_daily` / `retention_weekly` / `retention_monthly` / `retention_use_folders` 已移除，老用户需手动迁移到嵌套写法。
 
 | 配置项 | 必填 | 默认值 | 说明 |
 | :--- | :---: | :--- | :--- |
 | `refresh_token` | ✅ | (无) | **必填**。从上一步获取的令牌。 |
 | `upload_path` | ❌ | `/HomeAssistant/Backup` | 网盘中的目标文件夹路径。会自动创建。 |
-| `schedule` | ❌ | `0 5 * * *` | 定时任务的 Cron 表达式。 |
-| `retention.daily` | ❌ | (不启用) | 远端保留：按”天”保留最近 N 份（同一天多份只保留最新一份）。 |
-| `retention.weekly` | ❌ | (不启用) | 远端保留：按”周”保留最近 N 份（同一周只保留最新一份）。 |
-| `retention.monthly` | ❌ | (不启用) | 远端保留：按”月”保留最近 N 份（同一月只保留最新一份）。 |
-| `retention.use_folders` | ❌ | `false` | 是否启用目录模式。启用后会在 `upload_path` 下使用 `每日/`、`每周/`、`每月/` 三个中文子目录。**首次启用时会自动将旧版英文目录（`daily/`、`weekly/`、`monthly/`）中的文件迁移到新目录**。 |
-| `retention_use_folders` | ❌ | `false` | （扁平配置方式）同 `retention.use_folders`，二选一即可。 |
-| `retention_daily` | ❌ | `7` | （扁平配置方式）同 `retention.daily`。 |
-| `retention_weekly` | ❌ | `4` | （扁平配置方式）同 `retention.weekly`。 |
-| `retention_monthly` | ❌ | `12` | （扁平配置方式）同 `retention.monthly`。 |
-
-> **配置方式说明**：支持两种配置方式 — **嵌套方式**（`retention.daily` 等）和 **扁平方式**（`retention_daily` 等）。嵌套方式优先级更高，两种方式二选一即可，不要同时使用。
+| `schedule` | ❌ | `0 5 * * *` | 定时任务的 Cron 表达式（5 字段：分 时 日 月 周）。 |
+| `retention.use_folders` | ❌ | `true` | 是否启用目录模式。启用后会在 `upload_path` 下使用 `每日/`、`每周/`、`每月/` 三个中文子目录。**首次启用时会自动将旧版英文目录（`daily/`、`weekly/`、`monthly/`）中的文件迁移到新目录**。 |
+| `retention.daily` | ❌ | `7` | 远端保留：按"天"保留最近 N 份（同一天多份只保留最新一份）。 |
+| `retention.weekly` | ❌ | `4` | 远端保留：按"周"保留最近 N 份（同一周只保留最新一份）。 |
+| `retention.monthly` | ❌ | `12` | 远端保留：按"月"保留最近 N 份（同一月只保留最新一份）。 |
+| `notifications.*` | ❌ | 见 config.yaml | 消息通知配置（邮箱 / 企业微信 / 钉钉 / 飞书）。 |
 
 ### 📝 配置示例
-
-**嵌套配置方式（推荐）**：
 
 ```yaml
 refresh_token: "122.a0b1c2d3e4f5g6h7i8j9k0l1m2n3o4p5..."
@@ -111,24 +104,31 @@ schedule: "0 5 * * *"  # 每天凌晨5点执行
 
 # 远端分层保留（推荐：daily=7、weekly=4、monthly=12）
 retention:
+  use_folders: true    # 启用目录模式（云端使用 /HomeAssistant/Backup/每日|每周|每月 三个目录）
   daily: 7
   weekly: 4
   monthly: 12
-
-# 可选：开启目录模式（云端使用 /HomeAssistant/Backup/每日|每周|每月 三个目录）
-  use_folders: true
 ```
 
-**扁平配置方式**：
+### ⚠️ v1.1.0 迁移指南
 
+如果你是从 v1.0.x 升级，老的扁平配置需要手动改成嵌套写法：
+
+**旧写法（已不支持）：**
 ```yaml
-refresh_token: "122.a0b1c2d3e4f5g6h7i8j9k0l1m2n3o4p5..."
-upload_path: "/HomeAssistant/Backup"
-schedule: "0 5 * * *"
 retention_use_folders: true
 retention_daily: 7
 retention_weekly: 4
 retention_monthly: 12
+```
+
+**新写法：**
+```yaml
+retention:
+  use_folders: true
+  daily: 7
+  weekly: 4
+  monthly: 12
 ```
 
 ### ⏰ Cron 表达式参考
