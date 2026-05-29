@@ -203,6 +203,22 @@ def _send_wechat(config: Dict[str, Any], title: str, content: str) -> bool:
         _log("企业微信 Webhook Key 未配置，跳过发送")
         return False
 
+    # 兼容用户粘贴完整 Webhook URL 的情况：自动提取 ?key=... 参数
+    if "://" in webhook_key or webhook_key.lower().startswith("http"):
+        try:
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(webhook_key)
+            extracted = parse_qs(parsed.query).get("key", [""])[0].strip()
+            if extracted:
+                _log("检测到完整 Webhook URL，已自动提取 key")
+                webhook_key = extracted
+            else:
+                _log("企业微信 Webhook Key 看起来是 URL 但未找到 ?key= 参数，请检查配置")
+                return False
+        except Exception as e:
+            _log(f"解析企业微信 Webhook URL 失败：{e}")
+            return False
+
     url = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={webhook_key}"
     full_content = f"{title}\n\n{content}"
     payload: Dict[str, Any] = {

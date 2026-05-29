@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.4
+
+### 修复
+- **企业微信 `webhook_key` 兼容完整 URL**：当用户在 `webhook_key` 字段粘贴完整 Webhook URL（如 `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx`）时，自动用 `urlparse` 提取 `?key=` 参数，避免出现 `invalid webhook url` 错误。原有只填 key 的写法仍然兼容
+
 ## 1.1.3
 
 ### 新增
