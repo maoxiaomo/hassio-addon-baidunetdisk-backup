@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.9
+
+### 修复
+- **容器时区错误**：Dockerfile 设置 `TZ=Asia/Shanghai` 并同步 `/etc/localtime`，修复日志时间显示为 UTC（比本地慢 8 小时）的问题
+
+## 1.0.8
+
+### 修复
+- **s6-overlay 启动报错**：`config.yaml` 添加 `init: false`，让 `python3 /main.py` 直接作为 PID 1 运行，修复 `s6-overlay-suexec: fatal: can only run as pid 1` 错误
+
+## 1.0.7
+
+### 修复
+- **配置保存失败 `Missing option 'retention' in root`**：移除 `config.yaml` schema 中嵌套的 `retention:` 定义（未标可选导致必填校验失败）。顶层 `retention_daily` / `retention_weekly` / `retention_monthly` / `retention_use_folders` 已覆盖所有场景；代码层仍兼容嵌套写法
+
+## 1.0.6
+
+### 新增
+- **添加 `build.yaml`**：明确指定各架构基础镜像（Home Assistant 官方 Alpine 3.19 base），修复 Supervisor 构建报错 `base name (${BUILD_FROM}) should not be blank`
+
+### 变更
+- 仓库地址统一更新为 Gitee：`https://gitee.com/mxmaimooo/hassio-addon-baidunetdisk-backup`
+
 ## 1.0.5
 
 ### 修复（P0 严重）
