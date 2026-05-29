@@ -130,21 +130,16 @@ def load_config() -> Tuple[str, str, Dict[str, Any], bool, CronSchedule, Dict[st
     )
     upload_path: str = options.get("upload_path", "/HomeAssistant/Backup")
 
-    # Support both nested and flat retention config (Issue 7 / 20)
-    retention = options.get("retention")
-    if retention is None:
-        retention = {
-            "daily": options.get("retention_daily", 0),
-            "weekly": options.get("retention_weekly", 0),
-            "monthly": options.get("retention_monthly", 0),
-        }
-    else:
-        retention = dict(retention)
-
-    retention_use_folders: bool = bool(
-        (isinstance(retention, dict) and retention.get("use_folders"))
-        or options.get("retention_use_folders")
-    )
+    # 嵌套 retention 配置（v1.1.0 起仅支持嵌套写法）
+    retention_raw = options.get("retention") or {}
+    if not isinstance(retention_raw, dict):
+        retention_raw = {}
+    retention: Dict[str, Any] = {
+        "daily": retention_raw.get("daily", 7),
+        "weekly": retention_raw.get("weekly", 4),
+        "monthly": retention_raw.get("monthly", 12),
+    }
+    retention_use_folders: bool = bool(retention_raw.get("use_folders", True))
 
     schedule_str: str = options.get("schedule", "0 5 * * *")
     cron = parse_cron(schedule_str)
@@ -252,7 +247,7 @@ def schedule_loop(
 def main() -> None:
     """Application entry point."""
     log("=" * 50)
-    log("Baidu Netdisk Backup Add-on v1.0.9 (OAuth 2.0)")
+    log("Baidu Netdisk Backup Add-on v1.1.0 (OAuth 2.0)")
     log("Using AList-compatible authentication method")
     log("Mode: Sync ALL backups with notifications")
     log("=" * 50)

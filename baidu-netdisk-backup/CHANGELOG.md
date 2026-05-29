@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.1.0
+
+### ⚠️ 破坏性变更
+- **移除扁平配置方式**：不再支持顶层 `retention_use_folders` / `retention_daily` / `retention_weekly` / `retention_monthly` 字段，统一使用嵌套 `retention:` 块
+- **默认开启目录模式**：`retention.use_folders` 默认值改为 `true`（之前是 `false`）
+
+### 迁移指南
+老用户需手动迁移配置：
+
+旧配置（不再支持）：
+```yaml
+retention_use_folders: true
+retention_daily: 7
+retention_weekly: 4
+retention_monthly: 12
+```
+
+新配置：
+```yaml
+retention:
+  use_folders: true
+  daily: 7
+  weekly: 4
+  monthly: 12
+```
+
 ## 1.0.9
 
 ### 修复
