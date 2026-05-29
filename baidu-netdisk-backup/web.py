@@ -90,10 +90,15 @@ button.big{padding:9px 20px;font-size:.95rem;min-width:160px}
 .result.err{display:block;background:#d62b2b22;color:#d62b2b}
 .foot{color:#888;font-size:.83rem;margin-top:18px}
 code{background:#8884;padding:1px 5px;border-radius:3px}
-.actions{display:flex;gap:10px;align-items:center;margin:18px 0;flex-wrap:wrap;
-         position:sticky;bottom:0;background:#fff8;backdrop-filter:blur(8px);padding:12px 0}
-@media (prefers-color-scheme:dark){.actions{background:#0008}}
+.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+         position:fixed;left:0;right:0;bottom:0;z-index:50;
+         background:#fffd;backdrop-filter:blur(10px);
+         padding:12px 16px;border-top:1px solid #4443;
+         box-shadow:0 -4px 12px #0002}
+@media (prefers-color-scheme:dark){.actions{background:#0d1117ee;border-top-color:#fff2}}
+.actions .inner{max-width:860px;margin:0 auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;width:100%}
 .actions .grow{flex:1}
+body{padding-bottom:90px}  /* 给底部按钮栏留空间 */
 @media (max-width:600px){.field{grid-template-columns:1fr}.field label{margin-bottom:2px}}
 </style></head><body>
 <h1>百度网盘备份</h1>
@@ -102,9 +107,11 @@ code{background:#8884;padding:1px 5px;border-radius:3px}
 <div id="config-form"></div>
 
 <div class="actions">
-  <div class="grow"></div>
-  <button class="secondary" id="btn-reload">重新加载</button>
-  <button class="big" id="btn-save">保存并重启加载项</button>
+  <div class="inner">
+    <div class="grow"></div>
+    <button class="secondary" id="btn-reload">重新加载</button>
+    <button class="big" id="btn-save">保存并重启加载项</button>
+  </div>
 </div>
 <div class="result" id="r-save"></div>
 <div class="foot">保存后会自动调用 HA Supervisor 重启本加载项使配置生效；若 Supervisor 不可用，请手动到加载项页面【重启】。测试通知按钮基于<b>当前已保存</b>的配置发送，未保存的修改不影响测试结果。</div>
