@@ -24,7 +24,7 @@
 - **🔀 目录迁移**：自动检测旧版英文目录（`daily/`、`weekly/`、`monthly/`）并将其中的备份文件迁移到对应的中文目录（`每日/`、`每周/`、`每月/`），升级用户无需手动干预。
 - **📋 清单文件生成**：每次同步完成后，在网盘根目录自动生成 `清单文件.txt`，汇总各子目录的文件数量、总大小和日期范围，方便快速了解备份状态。
 - **🔔 通知功能（已实现）**：支持 4 种通知渠道 — 邮箱、企业微信机器人、钉钉机器人、飞书机器人；覆盖 5 种事件类型 — 备份成功、备份失败、目录迁移完成、清单文件生成、存储空间告警。
-- **🧪 通知测试 Web UI**：加载项内嵌一个 Ingress Web 页面，每个通知渠道一个【测试发送】按钮，可即时验证配置是否正确（v1.1.3 起）。
+- **🖥️ 内嵌 Web 管理界面（v1.2.x）**：加载项内置中文 Web UI（HA 侧边栏【打开 Web UI】），可在线编辑所有配置项（基础/保留/通知）并一键保存重启；每个通知渠道带【测试发送】按钮，实时验证配置；存储告警阈值用百分比输入。
 
 ---
 
@@ -326,21 +326,14 @@ notifications:
 
 ---
 
-## 📮 问题反馈与贡献
+## 📮 问题反馈
 
-### 问题反馈
-
-如果您在使用过程中遇到问题或有功能建议，欢迎通过以下方式反馈：
+> ⚠️ **声明**：本项目目前处于**维护阶段**，遵循「能用就不改」原则。
+>
+> 作者只会修复影响**自己使用**的问题，一切以个人利益为重。欢迎 Fork 自行修改。
 
 - **Gitee Issues**：https://gitee.com/mxmaimooo/hassio-addon-baidunetdisk-backup/issues
 - **GitHub Issues**：https://github.com/maoxiaomo/hassio-addon-baidunetdisk-backup/issues
-
-### 贡献指南
-
-欢迎提交 Pull Request 来改进本项目！
-
-- **Gitee PR**：https://gitee.com/mxmaimooo/hassio-addon-baidunetdisk-backup/pulls
-- **GitHub PR**：https://github.com/maoxiaomo/hassio-addon-baidunetdisk-backup/pulls
 
 ---
 
