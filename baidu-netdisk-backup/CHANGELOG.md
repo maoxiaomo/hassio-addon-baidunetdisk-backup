@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.0
+
+### 新增
+- **Web UI 增加"配置编辑"标签页**：所有 HA Add-on 配置项以中文表单形式呈现（基础配置、保留策略、通知全局、事件开关、4 个渠道），可直接修改并点击【保存并重启加载项】，无需到加载项配置页操作
+- **保存后自动重启**：通过 Supervisor API (`POST /addons/self/restart`) 重启本加载项以使配置生效；Supervisor 不可用时给出明确提示
+- **`config.yaml` 增加 `hassio_api: true`**：注入 `SUPERVISOR_TOKEN` 以便调用 Supervisor API
+
+### 改进
+- Web UI 改为双标签页布局：【通知测试】+【配置编辑】
+- 测试与状态接口路径调整为 `./api/test/<channel>` / `./api/state` / `./api/config`
+- 中文标签 + 字段说明，覆盖所有配置项；密码类字段使用 `<input type=password>`
+
 ## 1.1.4
 
 ### 修复

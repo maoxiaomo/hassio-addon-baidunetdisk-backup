@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""轻量 Web UI — 在 HA 加载项里点【打开 Web UI】，可对每个通知渠道发送测试。"""
+"""Web UI — 两个标签页：通知测试 + 配置编辑（中文界面）。"""
 import json
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict
+
+import requests
 
 from client import log
 from notifier import test_notification
@@ -27,84 +29,303 @@ def _load_options() -> Dict[str, Any]:
         return {}
 
 
-_HTML = """<!doctype html>
+def _save_options(opts: Dict[str, Any]) -> None:
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(opts, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, CONFIG_PATH)
+
+
+def _restart_addon() -> Dict[str, Any]:
+    """通过 HA Supervisor API 重启本加载项。"""
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    if not token:
+        return {"ok": False, "message": "SUPERVISOR_TOKEN 不存在，无法自动重启；请到加载项页面手动重启"}
+    try:
+        r = requests.post(
+            "http://supervisor/addons/self/restart",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            return {"ok": True, "message": "已请求 Supervisor 重启加载项"}
+        return {"ok": False, "message": f"Supervisor 返回 {r.status_code}: {r.text[:200]}"}
+    except Exception as e:
+        return {"ok": False, "message": f"调用 Supervisor 失败：{e}"}
+
+
+_HTML = r"""<!doctype html>
 <html lang="zh-CN"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>百度网盘备份 — 通知测试</title>
+<title>百度网盘备份</title>
 <style>
 :root{color-scheme:light dark}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
-     max-width:760px;margin:24px auto;padding:0 16px;line-height:1.55}
+     max-width:860px;margin:20px auto;padding:0 16px;line-height:1.55}
 h1{font-size:1.4rem;margin:0 0 4px}
-.sub{color:#888;margin-bottom:24px}
-.card{border:1px solid #4443;border-radius:10px;padding:16px 18px;margin-bottom:14px;
-      display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.sub{color:#888;margin-bottom:18px;font-size:.9rem}
+.tabs{display:flex;gap:4px;border-bottom:1px solid #4443;margin-bottom:18px}
+.tab{padding:9px 18px;cursor:pointer;border:0;background:transparent;color:inherit;
+     font-size:.95rem;border-bottom:2px solid transparent;border-radius:6px 6px 0 0}
+.tab.active{border-bottom-color:#1f6feb;color:#1f6feb;font-weight:600}
+.pane{display:none}.pane.active{display:block}
+.card{border:1px solid #4443;border-radius:10px;padding:14px 18px;margin-bottom:14px}
+.card.row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .card .meta{flex:1;min-width:200px}
 .name{font-weight:600;font-size:1.05rem}
 .state{font-size:.85rem;color:#888;margin-top:2px}
-.state.on{color:#2a8a2a}
-.state.off{color:#a05}
+.state.on{color:#2a8a2a}.state.off{color:#a05}
+.section-title{font-weight:600;font-size:1.05rem;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+.section-title .pill{font-size:.72rem;background:#1f6feb22;color:#1f6feb;padding:1px 7px;border-radius:10px}
+.field{display:grid;grid-template-columns:160px 1fr;gap:10px;align-items:center;margin-bottom:9px}
+.field label{color:#888;font-size:.88rem}
+.field .desc{color:#888;font-size:.78rem;grid-column:2;margin-top:-4px}
+.field input[type=text],.field input[type=number],.field input[type=password]{
+  width:100%;padding:7px 10px;border:1px solid #8884;border-radius:5px;
+  background:transparent;color:inherit;font-size:.92rem;font-family:inherit;box-sizing:border-box}
+.field input[type=checkbox]{transform:scale(1.15)}
 button{padding:8px 18px;border:0;border-radius:6px;background:#1f6feb;color:#fff;
-       font-size:.95rem;cursor:pointer;min-width:96px}
+       font-size:.95rem;cursor:pointer;min-width:96px;font-family:inherit}
 button:hover{background:#1a5fd1}
 button:disabled{background:#888;cursor:wait}
+button.secondary{background:#888}
+button.secondary:hover{background:#666}
 .result{font-size:.9rem;margin-top:8px;width:100%;padding:8px 10px;border-radius:6px;display:none}
 .result.ok{display:block;background:#1f8b4c22;color:#1f8b4c}
 .result.err{display:block;background:#d62b2b22;color:#d62b2b}
-.foot{color:#888;font-size:.85rem;margin-top:18px}
+.foot{color:#888;font-size:.83rem;margin-top:18px}
 code{background:#8884;padding:1px 5px;border-radius:3px}
+.actions{display:flex;gap:10px;align-items:center;margin:18px 0;flex-wrap:wrap}
+.actions .grow{flex:1}
+@media (max-width:600px){.field{grid-template-columns:1fr}.field label{margin-bottom:2px}}
 </style></head><body>
-<h1>百度网盘备份 — 通知渠道测试</h1>
-<div class="sub">点击【测试发送】立即向对应渠道发送一条测试消息，无需重启加载项。配置改动后请先在加载项配置页【保存】再来测试。</div>
-<div id="list"></div>
-<div class="foot">读取自 <code>/data/options.json</code>，只有 <b>enabled=true</b> 且填了必要字段的渠道才会真正发送。</div>
+<h1>百度网盘备份</h1>
+<div class="sub">通知渠道测试 + 配置编辑（配置保存后会自动重启加载项以生效）</div>
+
+<div class="tabs">
+  <button class="tab active" data-pane="test">通知测试</button>
+  <button class="tab" data-pane="config">配置编辑</button>
+</div>
+
+<div id="pane-test" class="pane active">
+  <div id="test-list"></div>
+  <div class="foot">点击【测试发送】立即向对应渠道发送一条测试消息，无需重启加载项。配置改动后请在【配置编辑】页面保存，或直接到加载项配置页保存。</div>
+</div>
+
+<div id="pane-config" class="pane">
+  <div id="config-form"></div>
+  <div class="actions">
+    <div class="grow"></div>
+    <button class="secondary" id="btn-reload">重新加载</button>
+    <button id="btn-save">保存并重启加载项</button>
+  </div>
+  <div class="result" id="r-save"></div>
+  <div class="foot">保存后会自动调用 HA Supervisor 重启本加载项以使配置生效；若 Supervisor 不可用，请手动到加载项页面【重启】。</div>
+</div>
+
 <script>
 const CHANNELS = __CHANNELS_JSON__;
-const STATE = __STATE_JSON__;
-const list = document.getElementById('list');
-for (const ch of CHANNELS) {
-  const s = STATE[ch] || {};
-  const enabled = !!s.enabled;
-  const filled = !!s.filled;
-  const card = document.createElement('div');
-  card.className = 'card';
-  card.innerHTML = `
-    <div class="meta">
-      <div class="name">${s.label}</div>
-      <div class="state ${enabled ? 'on' : 'off'}">
-        ${enabled ? '已启用' : '未启用'} · ${filled ? '配置已填' : '配置缺失'}
-      </div>
-    </div>
-    <button data-ch="${ch}">测试发送</button>
-    <div class="result" id="r-${ch}"></div>
-  `;
-  list.appendChild(card);
-}
-document.querySelectorAll('button[data-ch]').forEach(btn => {
-  btn.addEventListener('click', async () => {
-    const ch = btn.dataset.ch;
-    const r = document.getElementById('r-' + ch);
-    r.className = 'result'; r.textContent = '';
-    btn.disabled = true; btn.textContent = '发送中...';
-    try {
-      const resp = await fetch('./test/' + ch, {method: 'POST'});
-      const data = await resp.json();
-      if (data.ok) { r.className = 'result ok'; r.textContent = '✅ ' + (data.message || '已发送'); }
-      else        { r.className = 'result err'; r.textContent = '❌ ' + (data.message || '失败'); }
-    } catch (e) {
-      r.className = 'result err'; r.textContent = '❌ 请求失败：' + e;
-    } finally {
-      btn.disabled = false; btn.textContent = '测试发送';
-    }
+
+// ============= Tab 切换 =============
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.pane').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById('pane-' + t.dataset.pane).classList.add('active');
   });
 });
+
+// ============= 通知测试 =============
+async function renderTests() {
+  const resp = await fetch('./api/state');
+  const state = await resp.json();
+  const list = document.getElementById('test-list');
+  list.innerHTML = '';
+  for (const ch of CHANNELS) {
+    const s = state[ch] || {};
+    const card = document.createElement('div');
+    card.className = 'card row';
+    card.innerHTML = `
+      <div class="meta">
+        <div class="name">${s.label}</div>
+        <div class="state ${s.enabled ? 'on' : 'off'}">
+          ${s.enabled ? '已启用' : '未启用'} · ${s.filled ? '配置已填' : '配置缺失'}
+        </div>
+      </div>
+      <button data-ch="${ch}">测试发送</button>
+      <div class="result" id="r-${ch}"></div>
+    `;
+    list.appendChild(card);
+  }
+  document.querySelectorAll('button[data-ch]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const ch = btn.dataset.ch;
+      const r = document.getElementById('r-' + ch);
+      r.className = 'result'; r.textContent = '';
+      btn.disabled = true; btn.textContent = '发送中...';
+      try {
+        const resp = await fetch('./api/test/' + ch, {method: 'POST'});
+        const data = await resp.json();
+        r.className = 'result ' + (data.ok ? 'ok' : 'err');
+        r.textContent = (data.ok ? '✅ ' : '❌ ') + (data.message || (data.ok ? '已发送' : '失败'));
+      } catch (e) {
+        r.className = 'result err'; r.textContent = '❌ 请求失败：' + e;
+      } finally {
+        btn.disabled = false; btn.textContent = '测试发送';
+      }
+    });
+  });
+}
+
+// ============= 配置编辑 =============
+// 字段定义：label / type / desc / 路径（在 options 对象里的位置）
+const FIELDS = [
+  {section: '基础配置', items: [
+    {key: 'refresh_token', label: 'refresh_token', type: 'password', desc: '百度 OAuth 授权刷新令牌（必填）'},
+    {key: 'upload_path', label: '上传路径', type: 'text', desc: '网盘中的目标目录，例如 /HomeAssistant/Backup'},
+    {key: 'schedule', label: '定时任务 (Cron)', type: 'text', desc: '5 字段 Cron，例如 0 5 * * * 表示每天凌晨 5 点'},
+  ]},
+  {section: '远端保留策略 (retention)', items: [
+    {key: 'retention.use_folders', label: '启用目录模式', type: 'bool', desc: '开启后按 每日/每周/每月 三个中文目录分类存放'},
+    {key: 'retention.daily', label: '每日保留份数', type: 'number', desc: '同一天多份只保留最新；<=0 表示不启用'},
+    {key: 'retention.weekly', label: '每周保留份数', type: 'number', desc: '同一周只保留最新；<=0 表示不启用'},
+    {key: 'retention.monthly', label: '每月保留份数', type: 'number', desc: '同一月只保留最新；<=0 表示不启用'},
+  ]},
+  {section: '通知 — 全局', items: [
+    {key: 'notifications.enabled', label: '启用通知', type: 'bool', desc: '全局开关；关闭后所有渠道都不发送'},
+    {key: 'notifications.storage_warning_threshold', label: '存储告警阈值', type: 'number', step: '0.01', desc: '0-1 小数；已用比例 >= 该值时触发 storage_warning'},
+  ]},
+  {section: '通知 — 事件开关 (events)', items: [
+    {key: 'notifications.events.backup_success', label: '备份成功', type: 'bool'},
+    {key: 'notifications.events.backup_failure', label: '备份失败', type: 'bool'},
+    {key: 'notifications.events.migration_done', label: '目录迁移完成', type: 'bool'},
+    {key: 'notifications.events.manifest_generated', label: '清单文件生成', type: 'bool'},
+    {key: 'notifications.events.storage_warning', label: '存储空间告警', type: 'bool'},
+  ]},
+  {section: '通知 — 邮箱 (SMTP)', items: [
+    {key: 'notifications.channels.email.enabled', label: '启用邮箱', type: 'bool'},
+    {key: 'notifications.channels.email.smtp_host', label: 'SMTP 服务器', type: 'text', desc: '例如 smtp.gmail.com'},
+    {key: 'notifications.channels.email.smtp_port', label: 'SMTP 端口', type: 'number', desc: 'TLS 用 587，SSL 用 465'},
+    {key: 'notifications.channels.email.use_ssl', label: '使用 SSL', type: 'bool', desc: 'true=SSL(465)，false=TLS(587)'},
+    {key: 'notifications.channels.email.username', label: '用户名', type: 'text'},
+    {key: 'notifications.channels.email.password', label: '密码', type: 'password', desc: '邮箱授权码（不是登录密码）'},
+    {key: 'notifications.channels.email.to_emails', label: '收件人', type: 'text', desc: '多个收件人用逗号分隔'},
+  ]},
+  {section: '通知 — 企业微信', items: [
+    {key: 'notifications.channels.wechat.enabled', label: '启用企业微信', type: 'bool'},
+    {key: 'notifications.channels.wechat.webhook_key', label: 'Webhook Key', type: 'text', desc: '可填 key 本身，也可粘贴完整 Webhook URL'},
+  ]},
+  {section: '通知 — 钉钉', items: [
+    {key: 'notifications.channels.dingtalk.enabled', label: '启用钉钉', type: 'bool'},
+    {key: 'notifications.channels.dingtalk.webhook_url', label: 'Webhook URL', type: 'text', desc: '完整 URL，含 access_token 参数'},
+    {key: 'notifications.channels.dingtalk.secret', label: '加签密钥 (可选)', type: 'password'},
+    {key: 'notifications.channels.dingtalk.at_all', label: '@所有人', type: 'bool'},
+  ]},
+  {section: '通知 — 飞书', items: [
+    {key: 'notifications.channels.feishu.enabled', label: '启用飞书', type: 'bool'},
+    {key: 'notifications.channels.feishu.webhook_url', label: 'Webhook URL', type: 'text', desc: '完整 URL'},
+    {key: 'notifications.channels.feishu.secret', label: '签名密钥 (可选)', type: 'password'},
+  ]},
+];
+
+let currentOptions = {};
+
+function getPath(obj, path) {
+  return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
+}
+function setPath(obj, path, value) {
+  const parts = path.split('.');
+  const last = parts.pop();
+  let cur = obj;
+  for (const p of parts) {
+    if (cur[p] == null || typeof cur[p] !== 'object') cur[p] = {};
+    cur = cur[p];
+  }
+  cur[last] = value;
+}
+
+function inputId(key) { return 'f_' + key.replace(/\./g, '_'); }
+
+async function renderConfig() {
+  const resp = await fetch('./api/config');
+  currentOptions = await resp.json();
+  const form = document.getElementById('config-form');
+  form.innerHTML = '';
+  for (const sec of FIELDS) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    let html = `<div class="section-title">${sec.section}</div>`;
+    for (const f of sec.items) {
+      const cur = getPath(currentOptions, f.key);
+      const id = inputId(f.key);
+      if (f.type === 'bool') {
+        html += `<div class="field">
+          <label for="${id}">${f.label}</label>
+          <div><input type="checkbox" id="${id}" data-key="${f.key}" data-type="bool" ${cur ? 'checked' : ''}></div>
+          ${f.desc ? `<div class="desc">${f.desc}</div>` : ''}
+        </div>`;
+      } else {
+        const t = f.type === 'number' ? 'number' : (f.type === 'password' ? 'password' : 'text');
+        const step = f.step ? ` step="${f.step}"` : '';
+        const val = cur == null ? '' : String(cur);
+        html += `<div class="field">
+          <label for="${id}">${f.label}</label>
+          <input type="${t}"${step} id="${id}" data-key="${f.key}" data-type="${f.type}" value="${val.replace(/"/g,'&quot;')}">
+          ${f.desc ? `<div class="desc">${f.desc}</div>` : ''}
+        </div>`;
+      }
+    }
+    card.innerHTML = html;
+    form.appendChild(card);
+  }
+}
+
+function collectConfig() {
+  // 深拷贝当前 options，逐字段覆盖
+  const out = JSON.parse(JSON.stringify(currentOptions));
+  document.querySelectorAll('#config-form [data-key]').forEach(el => {
+    const key = el.dataset.key;
+    const t = el.dataset.type;
+    let v;
+    if (t === 'bool') v = el.checked;
+    else if (t === 'number') {
+      const raw = el.value.trim();
+      if (raw === '') v = 0;
+      else v = Number(raw);
+    } else v = el.value;
+    setPath(out, key, v);
+  });
+  return out;
+}
+
+document.getElementById('btn-reload').addEventListener('click', renderConfig);
+document.getElementById('btn-save').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-save');
+  const r = document.getElementById('r-save');
+  r.className = 'result'; r.textContent = '';
+  btn.disabled = true; btn.textContent = '保存中...';
+  try {
+    const body = JSON.stringify(collectConfig());
+    const resp = await fetch('./api/config', {method: 'POST', headers: {'Content-Type': 'application/json'}, body});
+    const data = await resp.json();
+    r.className = 'result ' + (data.ok ? 'ok' : 'err');
+    r.textContent = (data.ok ? '✅ ' : '❌ ') + (data.message || '');
+  } catch (e) {
+    r.className = 'result err'; r.textContent = '❌ 请求失败：' + e;
+  } finally {
+    btn.disabled = false; btn.textContent = '保存并重启加载项';
+  }
+});
+
+renderTests();
+renderConfig();
 </script></body></html>
 """
 
 
 def _build_state() -> Dict[str, Dict[str, Any]]:
-    """渠道当前的 enabled / 是否填了关键字段。"""
     opts = _load_options()
     chans = (opts.get("notifications") or {}).get("channels") or {}
     out: Dict[str, Dict[str, Any]] = {}
@@ -115,20 +336,14 @@ def _build_state() -> Dict[str, Dict[str, Any]]:
             filled = all(cfg.get(k) for k in ("smtp_host", "username", "password", "to_emails"))
         elif ch == "wechat":
             filled = bool(cfg.get("webhook_key"))
-        else:  # dingtalk / feishu
+        else:
             filled = bool(cfg.get("webhook_url"))
         out[ch] = {"enabled": enabled, "filled": filled, "label": CHANNEL_LABELS[ch]}
     return out
 
 
 def _render_html() -> bytes:
-    state = _build_state()
-    html = (
-        _HTML
-        .replace("__CHANNELS_JSON__", json.dumps(CHANNELS))
-        .replace("__STATE_JSON__", json.dumps(state, ensure_ascii=False))
-    )
-    return html.encode("utf-8")
+    return _HTML.replace("__CHANNELS_JSON__", json.dumps(CHANNELS)).encode("utf-8")
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -141,12 +356,13 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, fmt: str, *args: Any) -> None:
-        # Quiet the noisy default access logger; route through our logger.
         log(f"web {self.address_string()} - {fmt % args}")
 
+    def _route(self) -> str:
+        return self.path.split("?", 1)[0].rstrip("/")
+
     def do_GET(self) -> None:
-        path = self.path.split("?", 1)[0].rstrip("/") or "/"
-        # Ingress 会保留路径前缀，所以匹配末尾即可
+        path = self._route() or "/"
         if path == "/" or path.endswith("/index.html"):
             body = _render_html()
             self.send_response(200)
@@ -156,25 +372,26 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if path.endswith("/api/state"):
+            self._send_json(200, _build_state())
+            return
+        if path.endswith("/api/config"):
+            self._send_json(200, _load_options())
+            return
         self._send_json(404, {"ok": False, "message": "not found"})
 
     def do_POST(self) -> None:
-        path = self.path.split("?", 1)[0].rstrip("/")
-        # 兼容 ingress 前缀，匹配 .../test/<channel>
+        path = self._route()
         parts = path.split("/")
+        # POST /api/test/<channel>
         if len(parts) >= 2 and parts[-2] == "test":
             channel = parts[-1]
             if channel not in CHANNELS:
                 self._send_json(400, {"ok": False, "message": f"未知渠道：{channel}"})
                 return
-            opts = _load_options()
-            chans = (opts.get("notifications") or {}).get("channels") or {}
-            cfg = chans.get(channel) or {}
+            cfg = ((_load_options().get("notifications") or {}).get("channels") or {}).get(channel) or {}
             if not cfg.get("enabled"):
-                self._send_json(
-                    200,
-                    {"ok": False, "message": "该渠道未启用 (enabled=false)，请先在配置中开启并保存"},
-                )
+                self._send_json(200, {"ok": False, "message": "该渠道未启用，请先在配置中开启并保存"})
                 return
             try:
                 ok = test_notification(channel, cfg)
@@ -182,11 +399,32 @@ class _Handler(BaseHTTPRequestHandler):
                 log(f"web 测试 {channel} 异常：{e}")
                 self._send_json(500, {"ok": False, "message": f"发送异常：{e}"})
                 return
-            self._send_json(
-                200,
-                {"ok": bool(ok), "message": "测试通知已发送" if ok else "发送失败，请查看加载项日志"},
-            )
+            self._send_json(200, {"ok": bool(ok), "message": "测试通知已发送" if ok else "发送失败，请查看加载项日志"})
             return
+
+        # POST /api/config — 保存并重启
+        if path.endswith("/api/config"):
+            try:
+                length = int(self.headers.get("Content-Length") or "0")
+                raw = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+                new_opts = json.loads(raw)
+                if not isinstance(new_opts, dict):
+                    raise ValueError("配置必须是 JSON 对象")
+            except Exception as e:
+                self._send_json(400, {"ok": False, "message": f"请求体解析失败：{e}"})
+                return
+            try:
+                _save_options(new_opts)
+                log("Web UI: 配置已保存，准备重启加载项")
+            except Exception as e:
+                log(f"Web UI: 配置保存失败：{e}")
+                self._send_json(500, {"ok": False, "message": f"配置保存失败：{e}"})
+                return
+            r = _restart_addon()
+            msg = ("配置已保存，" + r["message"]) if r["ok"] else ("配置已保存，但 " + r["message"])
+            self._send_json(200, {"ok": True, "message": msg})
+            return
+
         self._send_json(404, {"ok": False, "message": "not found"})
 
 

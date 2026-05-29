@@ -1,6 +1,6 @@
 # 百度网盘备份 - Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-1.1.4-blue.svg)
+![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)
 ![Auth](https://img.shields.io/badge/认证方式-OAuth_2.0-green.svg)
 ![Python](https://img.shields.io/badge/Python-3.x-yellow.svg)
 

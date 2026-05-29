@@ -296,7 +296,7 @@ def schedule_loop(
 def main() -> None:
     """Application entry point."""
     log("=" * 50)
-    log("Baidu Netdisk Backup Add-on v1.1.4 (OAuth 2.0)")
+    log("Baidu Netdisk Backup Add-on v1.2.0 (OAuth 2.0)")
     log("Using AList-compatible authentication method")
     log("Mode: Sync ALL backups with notifications")
     log("=" * 50)
