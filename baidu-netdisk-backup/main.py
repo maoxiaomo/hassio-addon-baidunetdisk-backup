@@ -16,6 +16,7 @@ from retention import (
     _join_remote_dir,
 )
 from sync import sync_all_backups
+from web import start_web_server
 
 CONFIG_PATH: str = "/data/options.json"
 
@@ -182,16 +183,23 @@ def run_sync_cycle(
 
         try:
             # 迁移旧英文目录到新中文目录（仅首次执行）
-            migrate_old_dirs(client, upload_path)
+            migrated = migrate_old_dirs(client, upload_path)
+            for info in migrated:
+                notify_event(notifications, "migration_done", info)
             retention_folder_mode(client, upload_path, retention)
         except Exception as e:
             log(f"Remote retention error: {e}")
 
         # 每次 retention 完成后生成备份清单文件
         try:
-            generate_manifest(client, upload_path)
+            manifest_info = generate_manifest(client, upload_path)
+            if manifest_info:
+                notify_event(notifications, "manifest_generated", manifest_info)
         except Exception as e:
             log(f"Generate manifest error: {e}")
+
+        # 存储空间检查
+        _check_storage_warning(client, notifications)
     else:
         sync_result = sync_all_backups(client, upload_path)
 
@@ -207,6 +215,47 @@ def run_sync_cycle(
             cleanup_remote_backups(client, upload_path, retention)
         except Exception as e:
             log(f"Remote retention error: {e}")
+
+        # 存储空间检查
+        _check_storage_warning(client, notifications)
+
+
+def _check_storage_warning(
+    client: BaiduClient,
+    notifications: Dict[str, Any],
+) -> None:
+    """检查网盘容量，达到阈值时触发 storage_warning 通知。
+
+    阈值取 notifications.storage_warning_threshold（0-1 之间小数；默认 0.9）。
+    """
+    try:
+        threshold = float(notifications.get("storage_warning_threshold", 0.9))
+    except (TypeError, ValueError):
+        threshold = 0.9
+    if threshold <= 0 or threshold >= 1:
+        threshold = 0.9
+
+    try:
+        quota = client.get_quota()
+    except Exception as e:
+        log(f"Storage warning check error: {e}")
+        return
+    if not quota or quota.get("total", 0) <= 0:
+        return
+
+    used = quota["used"]
+    total = quota["total"]
+    ratio = used / total
+    log(
+        f"网盘容量：已用 {used / 1024**3:.2f} GB / 总 {total / 1024**3:.2f} GB "
+        f"({ratio * 100:.1f}%)，阈值 {threshold * 100:.0f}%"
+    )
+    if ratio >= threshold:
+        notify_event(
+            notifications,
+            "storage_warning",
+            {"used": used, "total": total, "free": quota.get("free", 0)},
+        )
 
 
 def schedule_loop(
@@ -247,7 +296,7 @@ def schedule_loop(
 def main() -> None:
     """Application entry point."""
     log("=" * 50)
-    log("Baidu Netdisk Backup Add-on v1.1.0 (OAuth 2.0)")
+    log("Baidu Netdisk Backup Add-on v1.1.3 (OAuth 2.0)")
     log("Using AList-compatible authentication method")
     log("Mode: Sync ALL backups with notifications")
     log("=" * 50)
@@ -278,6 +327,9 @@ def main() -> None:
             time.sleep(3600)
 
     client = init_client(refresh_token)
+
+    # Web UI（Ingress 通道）— 后台线程，失败不影响主流程
+    start_web_server(port=8099)
 
     log("Running initial sync...")
     run_sync_cycle(client, upload_path, retention, retention_use_folders, notifications)

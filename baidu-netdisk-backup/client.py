@@ -240,6 +240,35 @@ class BaiduClient:
             self._refresh_access_token()
 
     # ------------------------------------------------------------------
+    # Quota
+    # ------------------------------------------------------------------
+    def get_quota(self) -> Optional[Dict[str, Any]]:
+        """获取网盘容量信息。返回 {total, used, free, expire} (bytes)；失败返回 None。"""
+        self._ensure_token()
+        url = "https://pan.baidu.com/api/quota"
+        params = {
+            "access_token": self.access_token,
+            "checkfree": 1,
+            "checkexpire": 1,
+        }
+        headers = {"User-Agent": "pan.baidu.com"}
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=DEFAULT_TIMEOUT)
+            data = r.json()
+            if data.get("errno", 0) != 0:
+                log(f"获取容量失败：{data}")
+                return None
+            return {
+                "total": int(data.get("total", 0)),
+                "used": int(data.get("used", 0)),
+                "free": int(data.get("free", 0)),
+                "expire": bool(data.get("expire", False)),
+            }
+        except Exception as e:
+            log(f"获取容量异常：{e}")
+            return None
+
+    # ------------------------------------------------------------------
     # Upload
     # ------------------------------------------------------------------
     def upload_file(self, local_path: str, remote_dir: str) -> bool:

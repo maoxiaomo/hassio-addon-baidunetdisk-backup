@@ -18,6 +18,7 @@ COPY client.py /
 COPY retention.py /
 COPY sync.py /
 COPY notifier.py /
+COPY web.py /
 COPY main.py /
 
 # Start the add-on

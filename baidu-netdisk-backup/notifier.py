@@ -456,7 +456,7 @@ def test_notification(channel: str, config: Dict[str, Any]) -> bool:
         True 表示测试发送成功
     """
     test_title = f"【测试通知】百度网盘备份插件 — {channel} 渠道测试"
-    test_content = f"这是一条测试消息，来自百度网盘备份插件 v1.0.3。\n渠道：{channel}\n时间：{datetime.now().strftime(TIME_FORMAT)}"
+    test_content = f"这是一条测试消息，来自百度网盘备份插件 v1.1.3。\n渠道：{channel}\n时间：{datetime.now().strftime(TIME_FORMAT)}"
     return send_notification(channel, config, test_title, test_content)
 
 

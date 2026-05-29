@@ -1,6 +1,6 @@
 # 百度网盘备份 - Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.1.3-blue.svg)
 ![Auth](https://img.shields.io/badge/认证方式-OAuth_2.0-green.svg)
 ![Python](https://img.shields.io/badge/Python-3.x-yellow.svg)
 
@@ -24,6 +24,7 @@
 - **🔀 目录迁移**：自动检测旧版英文目录（`daily/`、`weekly/`、`monthly/`）并将其中的备份文件迁移到对应的中文目录（`每日/`、`每周/`、`每月/`），升级用户无需手动干预。
 - **📋 清单文件生成**：每次同步完成后，在网盘根目录自动生成 `清单文件.txt`，汇总各子目录的文件数量、总大小和日期范围，方便快速了解备份状态。
 - **🔔 通知功能（已实现）**：支持 4 种通知渠道 — 邮箱、企业微信机器人、钉钉机器人、飞书机器人；覆盖 5 种事件类型 — 备份成功、备份失败、目录迁移完成、清单文件生成、存储空间告警。
+- **🧪 通知测试 Web UI**：加载项内嵌一个 Ingress Web 页面，每个通知渠道一个【测试发送】按钮，可即时验证配置是否正确（v1.1.3 起）。
 
 ---
 
@@ -210,9 +211,9 @@ retention:
 | :--- | :--- | :--- |
 | `backup_success` | 同步任务成功完成 | 文件总数、成功数、跳过数、目标路径 |
 | `backup_failure` | 同步过程中发生错误 | 错误信息、目标路径 |
-| `migration_done` | 目录迁移完成后 | 源目录、目标目录、迁移文件数 |
 | `manifest_generated` | 清单文件生成后 | 清单文件路径、文件数量、总大小 |
-| `storage_warning` | 存储空间告警 | 已用空间、总空间、使用率 |
+| `migration_done` | 旧英文目录迁移完成后 | 源目录、目标目录、迁移文件数 |
+| `storage_warning` | 网盘已用容量超过阈值时触发（每个同步周期检查一次）。阈值由 `notifications.storage_warning_threshold` 控制，默认 `0.9`（90%） | 已用空间、总空间、使用率 |
 
 ### 关键特性
 
@@ -264,7 +265,7 @@ notifications:
 
 > ⚠️ **SMTP 端口说明**：587 端口使用 TLS（`use_ssl: false`），465 端口使用 SSL（`use_ssl: true`）。配置不匹配会导致连接超时。
 
-> ⚠️ **注意**：`migration_done`、`manifest_generated`、`storage_warning` 三个事件类型当前版本**未实现触发逻辑**，启用后不会收到通知。
+> ⚠️ **注意**：v1.1.2 起 5 个通知事件全部实装完毕。`storage_warning` 默认阈值 90%（`notifications.storage_warning_threshold: 0.9`），每个同步周期结束后检查一次容量。
 
 > ⚠️ **注意**：插件本地维护一份上传缓存（`/data/upload_cache.json`），用于避免重复上传。如果你**手动在百度网盘删除**了某个备份，插件不会自动重新上传。若需让插件重传，请删除 `/data/upload_cache.json` 或停用并重新启用 add-on。
 

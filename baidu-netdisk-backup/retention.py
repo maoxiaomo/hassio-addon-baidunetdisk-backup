@@ -422,15 +422,21 @@ _MIGRATION_FLAG_FILE: str = "/data/migration_done.flag"
 def migrate_old_dirs(
     client: "BaiduClient",  # type: ignore[valid-type]
     base_upload_path: str,
-) -> None:
+) -> List[Dict[str, Any]]:
     """将旧的英文目录（daily/weekly/monthly）中的文件迁移到新的中文目录。
 
     通过 `/data/migration_done.flag` 标记，仅执行一次；写标记失败时降级为每次扫描。
+
+    Returns:
+        list of {"from_dir", "to_dir", "count"} — 本次实际发生迁移的目录；
+        无迁移时返回空列表。
     """
     import os as _os
 
+    migrated: List[Dict[str, Any]] = []
+
     if _os.path.exists(_MIGRATION_FLAG_FILE):
-        return
+        return migrated
 
     dir_mapping: Dict[str, str] = {
         "daily": "每日",
@@ -476,6 +482,9 @@ def migrate_old_dirs(
             # 迁移完成后删除空的旧目录
             client.delete_remote_files([old_dir])
             log(f"迁移完成并已删除旧目录：{old_dir}")
+            migrated.append(
+                {"from_dir": old_dir, "to_dir": new_dir, "count": len(moves)}
+            )
 
     # 写入完成标记，下次启动跳过迁移；写失败则下次仍然扫描（容错）
     try:
@@ -485,6 +494,8 @@ def migrate_old_dirs(
     except Exception as e:
         log(f"迁移完成标记写入失败（不影响功能，下次会重新扫描）：{e}")
 
+    return migrated
+
 
 # ============================================================================
 # 生成备份清单文件
@@ -492,7 +503,7 @@ def migrate_old_dirs(
 def generate_manifest(
     client: "BaiduClient",  # type: ignore[valid-type]
     base_upload_path: str,
-) -> None:
+) -> Optional[Dict[str, Any]]:
     """生成备份清单文件并上传到网盘。
 
     汇总每日/每周/每月三个子目录的文件数量、总大小和日期范围，
@@ -585,5 +596,10 @@ def generate_manifest(
         log(f"清单文件已生成，正在上传到 {base_upload_path}/清单文件.txt")
         client.upload_file(temp_path, base_upload_path)
         log("清单文件上传完成")
+        return {
+            "manifest_path": f"{base_upload_path.rstrip('/')}/清单文件.txt",
+            "file_count": total_count,
+            "total_size": total_size,
+        }
     finally:
         _shutil.rmtree(tmp_dir, ignore_errors=True)

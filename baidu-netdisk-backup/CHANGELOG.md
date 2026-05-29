@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.1.3
+
+### 新增
+- **Web UI 测试按钮**：加载项启用 HA Ingress，加载项页面顶部出现【打开 Web UI】按钮；点击进入页面后，4 个通知渠道（邮箱 / 企业微信 / 钉钉 / 飞书）各有一个【测试发送】按钮，可直接验证配置是否正确，无需重启加载项
+- **新增模块 `web.py`**：基于 Python 内置 `http.server` 的轻量 Web 服务（端口 8099），后台守护线程运行，启动失败不影响主备份流程
+- **页面状态显示**：实时显示各渠道的 `enabled` 和"配置已填/缺失"状态
+
+### 备注
+- Web UI 通过 HA Ingress 安全访问，不暴露端口到主机
+- 测试通知内容为固定文案：`【测试通知】百度网盘备份插件 — <渠道> 渠道测试`
+- 测试发送前会校验渠道 `enabled` 与必要字段；未启用或字段缺失时按钮会返回相应提示
+
+## 1.1.2
+
+### 新增
+- **`storage_warning` 事件实装**：每次同步周期结束后调用百度官方容量接口 `/api/quota` 查询网盘使用率，超过阈值时触发通知
+- **新增配置 `notifications.storage_warning_threshold`**：告警阈值，0-1 小数，默认 `0.9`（已用 90%）
+- **`BaiduClient.get_quota()`**：封装 `https://pan.baidu.com/api/quota?checkfree=1&checkexpire=1`，返回 `{total, used, free, expire}`
+
+### 备注
+- 至此 5 个通知事件（`backup_success` / `backup_failure` / `migration_done` / `manifest_generated` / `storage_warning`）全部实装完成
+- 默认 `storage_warning` 事件仍是关闭的，需要在配置中显式打开
+
+## 1.1.1
+
+### 新增
+- **通知事件 `manifest_generated` 实装**：清单文件上传完成后会触发通知，内容包含清单路径、汇总文件数与总占用空间
+- **通知事件 `migration_done` 实装**：旧版英文目录迁移到中文目录时触发通知，按源目录粒度逐一发送（含源/目标目录、迁移文件数）
+
+### 备注
+- `storage_warning` 仍未实装（需额外查询百度网盘容量 API）
+- 默认配置仍将这两个事件关闭，需在配置中显式打开 `notifications.events.manifest_generated` / `notifications.events.migration_done`
+
 ## 1.1.0
 
 ### ⚠️ 破坏性变更
