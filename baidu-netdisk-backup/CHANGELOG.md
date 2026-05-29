@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.4
+
+### 修复（P0 严重）
+- **钉钉加签算法错误**：修复 `notifier.py` 中钉钉签名使用 `.hex()` 而非 `base64.b64encode()` 的错误，导致加签模式 100% 失败。现已对齐官方算法，加签用户可正常收到通知
+
+### 修复（P1 重要）
+- **通知重试嵌套**：移除 `_send_wechat` / `_send_dingtalk` / `_send_feishu` 中的外层重试循环，避免与 `_retry_request` 内部重试叠加造成最多 9 次尝试 + 40+ 秒阻塞
+- **邮件连接泄露**：`_send_email` 增加异常时的 `server.quit()` 清理，防止 login/sendmail 失败时 socket 泄露
+- **空备份目录误报成功**：`run_sync_cycle` 增加 `success_count > 0` 判断，避免 `/backup` 为空时发送"备份成功"通知（total=0 / success=0 会让用户误以为异常）
+
+### 文档
+- README 通知配置示例补充 SMTP 端口说明（587=TLS / 465=SSL）和 `use_ssl` 对应关系
+- README 和 `config.yaml` 标注 `migration_done` / `manifest_generated` / `storage_warning` 三个事件类型当前版本未实现触发逻辑，默认关闭
+
+### 版本号
+- `config.yaml` / `main.py` / `README.md` 版本号统一更新为 1.0.4
+
 ## 1.0.3
 
 ### 修复

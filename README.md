@@ -1,14 +1,14 @@
 # 百度网盘备份 - Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-1.0.3-blue.svg)
+![Version](https://img.shields.io/badge/version-1.0.4-blue.svg)
 ![Auth](https://img.shields.io/badge/认证方式-OAuth_2.0-green.svg)
 ![Python](https://img.shields.io/badge/Python-3.x-yellow.svg)
 
 一个用于 Home Assistant 的 Supervisor 加载项 (Add-on)，可以自动将您的 HA 备份文件同步上传到百度网盘。
 
-> **v1.0.3 更新发布！**
+> **v1.0.4 更新发布！**
 >
-> 新增**消息通知功能**，支持 4 种通知渠道（邮箱/企业微信/钉钉/飞书），5 种事件类型，集成到备份流程中，实时掌握备份状态。
+> 修复钉钉加签算法错误、优化通知重试机制、改进空备份目录处理逻辑。
 
 ---
 
@@ -29,12 +29,19 @@
 
 ## 🛠️ 安装方法
 
-**地址**：http://192.168.123.254:8418/gitea/hassio-addon-baidunetdisk-backup-master
+**地址**：https://gitee.com/mxmaimooo/hassio-addon-baidunetdisk-backup
 
-### 🚀 手动安装
+**Github源**：https://github.com/maoxiaomo/hassio-addon-baidunetdisk-backup
 
-### 手动安装
-1. 复制上面的 Gitee 地址。
+### 🚀 一键安装（推荐）
+
+点击下方按钮，直接在 Home Assistant 中添加本插件（使用 Gitee 国内源）：
+
+[![Open your Home Assistant instance and show the add-on store.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgitee.com%2Fmxmaimooo%2Fhassio-addon-baidunetdisk-backup)
+
+### 📝 手动安装
+
+1. 复制上面的仓库地址（Gitee 或 GitHub 任选其一）。
 2. 进入 Home Assistant：**配置** > **加载项** > **加载项商店**。
 3. 点击右上角菜单（三个点） > **仓库**。
 4. 粘贴地址并点击 **添加**。
@@ -225,19 +232,20 @@ notifications:
   events:
     backup_success: true
     backup_failure: true
-    migration_done: true
-    manifest_generated: false    # 清单生成不通知
-    storage_warning: true
+    migration_done: false        # 目录迁移通知（未实现）
+    manifest_generated: false    # 清单生成通知（未实现）
+    storage_warning: false       # 存储告警通知（未实现）
 
   # 渠道配置
   channels:
     email:
       enabled: false
       smtp_host: "smtp.gmail.com"
-      smtp_port: 587
+      smtp_port: 587              # TLS 端口；SSL 使用 465
       username: "your-email@gmail.com"
       password: "your-app-password"
       to_emails: "receiver@example.com"
+      use_ssl: false              # true=SSL(465), false=TLS(587)
 
     wechat:
       enabled: true
@@ -253,6 +261,10 @@ notifications:
       webhook_url: "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
       secret: ""  # 签名校验密钥（可选）
 ```
+
+> ⚠️ **SMTP 端口说明**：587 端口使用 TLS（`use_ssl: false`），465 端口使用 SSL（`use_ssl: true`）。配置不匹配会导致连接超时。
+
+> ⚠️ **注意**：`migration_done`、`manifest_generated`、`storage_warning` 三个事件类型当前版本**未实现触发逻辑**，启用后不会收到通知。
 
 > ⚠️ **注意**：插件本地维护一份上传缓存（`/data/upload_cache.json`），用于避免重复上传。如果你**手动在百度网盘删除**了某个备份，插件不会自动重新上传。若需让插件重传，请删除 `/data/upload_cache.json` 或停用并重新启用 add-on。
 
@@ -313,8 +325,24 @@ notifications:
 
 ---
 
-## 问题反馈
+## 📮 问题反馈与贡献
 
-> ⚠️ **声明**：本项目目前处于**维护阶段**，遵循「能用就不改」原则。
-> 
-> 作者只会修复影响**自己使用**的问题，一切以个人利益为重。欢迎 Fork 自行修改。
+### 问题反馈
+
+如果您在使用过程中遇到问题或有功能建议，欢迎通过以下方式反馈：
+
+- **Gitee Issues**：https://gitee.com/mxmaimooo/hassio-addon-baidunetdisk-backup/issues
+- **GitHub Issues**：https://github.com/maoxiaomo/hassio-addon-baidunetdisk-backup/issues
+
+### 贡献指南
+
+欢迎提交 Pull Request 来改进本项目！
+
+- **Gitee PR**：https://gitee.com/mxmaimooo/hassio-addon-baidunetdisk-backup/pulls
+- **GitHub PR**：https://github.com/maoxiaomo/hassio-addon-baidunetdisk-backup/pulls
+
+---
+
+## 📄 开源协议
+
+本项目采用 MIT 协议开源，详见 [LICENSE](LICENSE) 文件。

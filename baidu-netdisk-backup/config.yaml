@@ -1,8 +1,8 @@
 name: "百度网盘备份 (Baidu Netdisk Backup)"
-version: "1.0.3"
+version: "1.0.4"
 slug: "baidu_netdisk_backup"
 description: "自动将 Home Assistant 备份文件上传到百度网盘 (正式版)"
-url: "http://192.168.123.254:8418/gitea/hassio-addon-baidunetdisk-backup-master"
+url: "https://github.com/maoxiaomo/hassio-addon-baidunetdisk-backup"
 startup: application
 arch:
   - aarch64
@@ -29,9 +29,9 @@ options:
     events:
       backup_success: true
       backup_failure: true
-      migration_done: true
+      migration_done: false
       manifest_generated: false
-      storage_warning: true
+      storage_warning: false
     channels:
       email:
         enabled: false

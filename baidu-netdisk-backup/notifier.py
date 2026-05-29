@@ -161,6 +161,7 @@ def _send_email(config: Dict[str, Any], title: str, content: str) -> bool:
     msg["To"] = ", ".join(to_emails)
 
     for attempt in range(1, MAX_RETRIES + 1):
+        server = None
         try:
             if use_ssl:
                 server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=TIMEOUT)
@@ -174,6 +175,11 @@ def _send_email(config: Dict[str, Any], title: str, content: str) -> bool:
             return True
         except Exception as e:
             _log(f"邮件发送失败（第 {attempt}/{MAX_RETRIES} 次）：{e}")
+            if server:
+                try:
+                    server.quit()
+                except Exception:
+                    pass
             if attempt < MAX_RETRIES:
                 time.sleep(RETRY_DELAY)
     _log(f"邮件通知最终失败")
@@ -204,19 +210,15 @@ def _send_wechat(config: Dict[str, Any], title: str, content: str) -> bool:
         "text": {"content": full_content},
     }
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        resp = _retry_request("POST", url, payload)
-        try:
-            data = resp.json()
-            if data.get("errcode") == 0:
-                _log("微信通知发送成功")
-                return True
-            _log(f"微信通知失败（第 {attempt}/{MAX_RETRIES} 次）：{data.get('errmsg', data)}")
-        except (json.JSONDecodeError, ValueError) as e:
-            _log(f"微信通知返回解析失败（第 {attempt}/{MAX_RETRIES} 次）：{e}")
-        if attempt < MAX_RETRIES:
-            time.sleep(RETRY_DELAY)
-    _log("微信通知最终失败")
+    resp = _retry_request("POST", url, payload)
+    try:
+        data = resp.json()
+        if data.get("errcode") == 0:
+            _log("微信通知发送成功")
+            return True
+        _log(f"微信通知失败：{data.get('errmsg', data)}")
+    except (json.JSONDecodeError, ValueError) as e:
+        _log(f"微信通知返回解析失败：{e}")
     return False
 
 
@@ -266,25 +268,21 @@ def _send_dingtalk(config: Dict[str, Any], title: str, content: str) -> bool:
             digestmod=hashlib.sha256,
         ).digest()
         sign = urllib.parse.quote_plus(
-            hmac_code if isinstance(hmac_code, str) else hmac_code.hex()
+            base64.b64encode(hmac_code).decode("utf-8")
         )
         # 如果 URL 已含 ? 则用 &，否则用 ?
         sep = "&" if "?" in url else "?"
         url = f"{url}{sep}timestamp={timestamp}&sign={sign}"
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        resp = _retry_request("POST", url, payload, headers=headers)
-        try:
-            data = resp.json()
-            if data.get("errcode") == 0:
-                _log("钉钉通知发送成功")
-                return True
-            _log(f"钉钉通知失败（第 {attempt}/{MAX_RETRIES} 次）：{data.get('errmsg', data)}")
-        except (json.JSONDecodeError, ValueError) as e:
-            _log(f"钉钉通知返回解析失败（第 {attempt}/{MAX_RETRIES} 次）：{e}")
-        if attempt < MAX_RETRIES:
-            time.sleep(RETRY_DELAY)
-    _log("钉钉通知最终失败")
+    resp = _retry_request("POST", url, payload, headers=headers)
+    try:
+        data = resp.json()
+        if data.get("errcode") == 0:
+            _log("钉钉通知发送成功")
+            return True
+        _log(f"钉钉通知失败：{data.get('errmsg', data)}")
+    except (json.JSONDecodeError, ValueError) as e:
+        _log(f"钉钉通知返回解析失败：{e}")
     return False
 
 
@@ -325,21 +323,17 @@ def _send_feishu(config: Dict[str, Any], title: str, content: str) -> bool:
         payload["timestamp"] = timestamp
         payload["sign"] = sign
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        resp = _retry_request("POST", webhook_url, payload)
-        try:
-            data = resp.json()
-            # 飞书成功返回 code=0 或 StatusCode=0
-            code = data.get("code", data.get("StatusCode", -1))
-            if code == 0:
-                _log("飞书通知发送成功")
-                return True
-            _log(f"飞书通知失败（第 {attempt}/{MAX_RETRIES} 次）：{data.get('msg', data)}")
-        except (json.JSONDecodeError, ValueError) as e:
-            _log(f"飞书通知返回解析失败（第 {attempt}/{MAX_RETRIES} 次）：{e}")
-        if attempt < MAX_RETRIES:
-            time.sleep(RETRY_DELAY)
-    _log("飞书通知最终失败")
+    resp = _retry_request("POST", webhook_url, payload)
+    try:
+        data = resp.json()
+        # 飞书成功返回 code=0 或 StatusCode=0
+        code = data.get("code", data.get("StatusCode", -1))
+        if code == 0:
+            _log("飞书通知发送成功")
+            return True
+        _log(f"飞书通知失败：{data.get('msg', data)}")
+    except (json.JSONDecodeError, ValueError) as e:
+        _log(f"飞书通知返回解析失败：{e}")
     return False
 
 

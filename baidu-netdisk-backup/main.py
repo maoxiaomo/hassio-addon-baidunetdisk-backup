@@ -178,7 +178,7 @@ def run_sync_cycle(
         sync_result = sync_all_backups(client, daily_dir)
 
         # 通知：备份成功 / 失败
-        if sync_result["success"]:
+        if sync_result["success"] and sync_result.get("success_count", 0) > 0:
             sync_result["upload_path"] = daily_dir
             notify_event(notifications, "backup_success", sync_result)
         elif sync_result.get("error"):
@@ -201,7 +201,7 @@ def run_sync_cycle(
         sync_result = sync_all_backups(client, upload_path)
 
         # 通知：备份成功 / 失败
-        if sync_result["success"]:
+        if sync_result["success"] and sync_result.get("success_count", 0) > 0:
             sync_result["upload_path"] = upload_path
             notify_event(notifications, "backup_success", sync_result)
         elif sync_result.get("error"):
@@ -252,7 +252,7 @@ def schedule_loop(
 def main() -> None:
     """Application entry point."""
     log("=" * 50)
-    log("Baidu Netdisk Backup Add-on v1.0.3 (OAuth 2.0)")
+    log("Baidu Netdisk Backup Add-on v1.0.4 (OAuth 2.0)")
     log("Using AList-compatible authentication method")
     log("Mode: Sync ALL backups with notifications")
     log("=" * 50)
