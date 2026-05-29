@@ -65,19 +65,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
      max-width:860px;margin:20px auto;padding:0 16px;line-height:1.55}
 h1{font-size:1.4rem;margin:0 0 4px}
 .sub{color:#888;margin-bottom:18px;font-size:.9rem}
-.tabs{display:flex;gap:4px;border-bottom:1px solid #4443;margin-bottom:18px}
-.tab{padding:9px 18px;cursor:pointer;border:0;background:transparent;color:inherit;
-     font-size:.95rem;border-bottom:2px solid transparent;border-radius:6px 6px 0 0}
-.tab.active{border-bottom-color:#1f6feb;color:#1f6feb;font-weight:600}
-.pane{display:none}.pane.active{display:block}
 .card{border:1px solid #4443;border-radius:10px;padding:14px 18px;margin-bottom:14px}
-.card.row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.card .meta{flex:1;min-width:200px}
-.name{font-weight:600;font-size:1.05rem}
-.state{font-size:.85rem;color:#888;margin-top:2px}
+.section-title{font-weight:600;font-size:1.05rem;margin:0 0 12px;display:flex;
+               align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.section-title .right{display:flex;align-items:center;gap:10px}
+.state{font-size:.82rem;color:#888}
 .state.on{color:#2a8a2a}.state.off{color:#a05}
-.section-title{font-weight:600;font-size:1.05rem;margin:0 0 12px;display:flex;align-items:center;gap:8px}
-.section-title .pill{font-size:.72rem;background:#1f6feb22;color:#1f6feb;padding:1px 7px;border-radius:10px}
 .field{display:grid;grid-template-columns:160px 1fr;gap:10px;align-items:center;margin-bottom:9px}
 .field label{color:#888;font-size:.88rem}
 .field .desc{color:#888;font-size:.78rem;grid-column:2;margin-top:-4px}
@@ -85,83 +78,169 @@ h1{font-size:1.4rem;margin:0 0 4px}
   width:100%;padding:7px 10px;border:1px solid #8884;border-radius:5px;
   background:transparent;color:inherit;font-size:.92rem;font-family:inherit;box-sizing:border-box}
 .field input[type=checkbox]{transform:scale(1.15)}
-button{padding:8px 18px;border:0;border-radius:6px;background:#1f6feb;color:#fff;
-       font-size:.95rem;cursor:pointer;min-width:96px;font-family:inherit}
+button{padding:7px 14px;border:0;border-radius:6px;background:#1f6feb;color:#fff;
+       font-size:.88rem;cursor:pointer;font-family:inherit}
 button:hover{background:#1a5fd1}
 button:disabled{background:#888;cursor:wait}
 button.secondary{background:#888}
 button.secondary:hover{background:#666}
-.result{font-size:.9rem;margin-top:8px;width:100%;padding:8px 10px;border-radius:6px;display:none}
+button.big{padding:9px 20px;font-size:.95rem;min-width:160px}
+.result{font-size:.85rem;margin-top:8px;padding:7px 10px;border-radius:6px;display:none}
 .result.ok{display:block;background:#1f8b4c22;color:#1f8b4c}
 .result.err{display:block;background:#d62b2b22;color:#d62b2b}
 .foot{color:#888;font-size:.83rem;margin-top:18px}
 code{background:#8884;padding:1px 5px;border-radius:3px}
-.actions{display:flex;gap:10px;align-items:center;margin:18px 0;flex-wrap:wrap}
+.actions{display:flex;gap:10px;align-items:center;margin:18px 0;flex-wrap:wrap;
+         position:sticky;bottom:0;background:#fff8;backdrop-filter:blur(8px);padding:12px 0}
+@media (prefers-color-scheme:dark){.actions{background:#0008}}
 .actions .grow{flex:1}
 @media (max-width:600px){.field{grid-template-columns:1fr}.field label{margin-bottom:2px}}
 </style></head><body>
 <h1>百度网盘备份</h1>
-<div class="sub">通知渠道测试 + 配置编辑（配置保存后会自动重启加载项以生效）</div>
+<div class="sub">所有配置项均可在此修改并保存；通知渠道支持【测试发送】实时验证。</div>
 
-<div class="tabs">
-  <button class="tab active" data-pane="test">通知测试</button>
-  <button class="tab" data-pane="config">配置编辑</button>
-</div>
+<div id="config-form"></div>
 
-<div id="pane-test" class="pane active">
-  <div id="test-list"></div>
-  <div class="foot">点击【测试发送】立即向对应渠道发送一条测试消息，无需重启加载项。配置改动后请在【配置编辑】页面保存，或直接到加载项配置页保存。</div>
+<div class="actions">
+  <div class="grow"></div>
+  <button class="secondary" id="btn-reload">重新加载</button>
+  <button class="big" id="btn-save">保存并重启加载项</button>
 </div>
-
-<div id="pane-config" class="pane">
-  <div id="config-form"></div>
-  <div class="actions">
-    <div class="grow"></div>
-    <button class="secondary" id="btn-reload">重新加载</button>
-    <button id="btn-save">保存并重启加载项</button>
-  </div>
-  <div class="result" id="r-save"></div>
-  <div class="foot">保存后会自动调用 HA Supervisor 重启本加载项以使配置生效；若 Supervisor 不可用，请手动到加载项页面【重启】。</div>
-</div>
+<div class="result" id="r-save"></div>
+<div class="foot">保存后会自动调用 HA Supervisor 重启本加载项使配置生效；若 Supervisor 不可用，请手动到加载项页面【重启】。测试通知按钮基于<b>当前已保存</b>的配置发送，未保存的修改不影响测试结果。</div>
 
 <script>
 const CHANNELS = __CHANNELS_JSON__;
+const CHANNEL_LABELS = __CHANNEL_LABELS_JSON__;
 
-// ============= Tab 切换 =============
-document.querySelectorAll('.tab').forEach(t => {
-  t.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-    document.querySelectorAll('.pane').forEach(x => x.classList.remove('active'));
-    t.classList.add('active');
-    document.getElementById('pane-' + t.dataset.pane).classList.add('active');
-  });
-});
+// ============= 字段定义 =============
+// section: 显示标题
+// testChannel: 若非空，该 section 标题右侧显示 [测试发送] 按钮并显示当前状态
+// items: 字段列表
+const FIELDS = [
+  {section: '基础配置', items: [
+    {key: 'refresh_token', label: 'refresh_token', type: 'password', desc: '百度 OAuth 授权刷新令牌（必填）'},
+    {key: 'upload_path', label: '上传路径', type: 'text', desc: '网盘中的目标目录，例如 /HomeAssistant/Backup'},
+    {key: 'schedule', label: '定时任务 (Cron)', type: 'text', desc: '5 字段 Cron，例如 0 5 * * * 表示每天凌晨 5 点'},
+  ]},
+  {section: '远端保留策略 (retention)', items: [
+    {key: 'retention.use_folders', label: '启用目录模式', type: 'bool', desc: '开启后按 每日/每周/每月 三个中文目录分类存放'},
+    {key: 'retention.daily', label: '每日保留份数', type: 'number', desc: '同一天多份只保留最新；<=0 表示不启用'},
+    {key: 'retention.weekly', label: '每周保留份数', type: 'number', desc: '同一周只保留最新；<=0 表示不启用'},
+    {key: 'retention.monthly', label: '每月保留份数', type: 'number', desc: '同一月只保留最新；<=0 表示不启用'},
+  ]},
+  {section: '通知 — 全局', items: [
+    {key: 'notifications.enabled', label: '启用通知', type: 'bool', desc: '全局开关；关闭后所有渠道都不发送'},
+  ]},
+  {section: '通知 — 事件开关 (events)', items: [
+    {key: 'notifications.events.backup_success', label: '备份成功', type: 'bool'},
+    {key: 'notifications.events.backup_failure', label: '备份失败', type: 'bool'},
+    {key: 'notifications.events.migration_done', label: '目录迁移完成', type: 'bool'},
+    {key: 'notifications.events.manifest_generated', label: '清单文件生成', type: 'bool'},
+    {key: 'notifications.events.storage_warning', label: '存储空间告警', type: 'bool'},
+    {key: 'notifications.storage_warning_threshold', label: '存储告警阈值 (%)', type: 'percent', desc: '已用比例 >= 该百分比时触发上面的"存储空间告警"事件'},
+  ]},
+  {section: '通知 — 邮箱 (SMTP)', testChannel: 'email', items: [
+    {key: 'notifications.channels.email.enabled', label: '启用邮箱', type: 'bool'},
+    {key: 'notifications.channels.email.smtp_host', label: 'SMTP 服务器', type: 'text', desc: '例如 smtp.gmail.com'},
+    {key: 'notifications.channels.email.smtp_port', label: 'SMTP 端口', type: 'number', desc: 'TLS 用 587，SSL 用 465'},
+    {key: 'notifications.channels.email.use_ssl', label: '使用 SSL', type: 'bool', desc: 'true=SSL(465)，false=TLS(587)'},
+    {key: 'notifications.channels.email.username', label: '用户名', type: 'text'},
+    {key: 'notifications.channels.email.password', label: '密码', type: 'password', desc: '邮箱授权码（不是登录密码）'},
+    {key: 'notifications.channels.email.to_emails', label: '收件人', type: 'text', desc: '多个收件人用逗号分隔'},
+  ]},
+  {section: '通知 — 企业微信', testChannel: 'wechat', items: [
+    {key: 'notifications.channels.wechat.enabled', label: '启用企业微信', type: 'bool'},
+    {key: 'notifications.channels.wechat.webhook_key', label: 'Webhook Key', type: 'text', desc: '可填 key 本身，也可粘贴完整 Webhook URL'},
+  ]},
+  {section: '通知 — 钉钉', testChannel: 'dingtalk', items: [
+    {key: 'notifications.channels.dingtalk.enabled', label: '启用钉钉', type: 'bool'},
+    {key: 'notifications.channels.dingtalk.webhook_url', label: 'Webhook URL', type: 'text', desc: '完整 URL，含 access_token 参数'},
+    {key: 'notifications.channels.dingtalk.secret', label: '加签密钥 (可选)', type: 'password'},
+    {key: 'notifications.channels.dingtalk.at_all', label: '@所有人', type: 'bool'},
+  ]},
+  {section: '通知 — 飞书', testChannel: 'feishu', items: [
+    {key: 'notifications.channels.feishu.enabled', label: '启用飞书', type: 'bool'},
+    {key: 'notifications.channels.feishu.webhook_url', label: 'Webhook URL', type: 'text', desc: '完整 URL'},
+    {key: 'notifications.channels.feishu.secret', label: '签名密钥 (可选)', type: 'password'},
+  ]},
+];
 
-// ============= 通知测试 =============
-async function renderTests() {
-  const resp = await fetch('./api/state');
-  const state = await resp.json();
-  const list = document.getElementById('test-list');
-  list.innerHTML = '';
-  for (const ch of CHANNELS) {
-    const s = state[ch] || {};
-    const card = document.createElement('div');
-    card.className = 'card row';
-    card.innerHTML = `
-      <div class="meta">
-        <div class="name">${s.label}</div>
-        <div class="state ${s.enabled ? 'on' : 'off'}">
-          ${s.enabled ? '已启用' : '未启用'} · ${s.filled ? '配置已填' : '配置缺失'}
-        </div>
-      </div>
-      <button data-ch="${ch}">测试发送</button>
-      <div class="result" id="r-${ch}"></div>
-    `;
-    list.appendChild(card);
+let currentOptions = {};
+let currentState = {};
+
+function getPath(obj, path) {
+  return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
+}
+function setPath(obj, path, value) {
+  const parts = path.split('.');
+  const last = parts.pop();
+  let cur = obj;
+  for (const p of parts) {
+    if (cur[p] == null || typeof cur[p] !== 'object') cur[p] = {};
+    cur = cur[p];
   }
-  document.querySelectorAll('button[data-ch]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const ch = btn.dataset.ch;
+  cur[last] = value;
+}
+function inputId(key) { return 'f_' + key.replace(/\./g, '_'); }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function renderConfig() {
+  const [cRes, sRes] = await Promise.all([fetch('./api/config'), fetch('./api/state')]);
+  currentOptions = await cRes.json();
+  currentState = await sRes.json();
+  const form = document.getElementById('config-form');
+  form.innerHTML = '';
+  for (const sec of FIELDS) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    let titleRight = '';
+    if (sec.testChannel) {
+      const st = currentState[sec.testChannel] || {};
+      titleRight = `
+        <div class="right">
+          <span class="state ${st.enabled ? 'on' : 'off'}">
+            ${st.enabled ? '已启用' : '未启用'} · ${st.filled ? '配置已填' : '配置缺失'}
+          </span>
+          <button data-test="${sec.testChannel}">测试发送</button>
+        </div>`;
+    }
+    let html = `<div class="section-title"><span>${esc(sec.section)}</span>${titleRight}</div>`;
+    if (sec.testChannel) html += `<div class="result" id="r-${sec.testChannel}"></div>`;
+    for (const f of sec.items) {
+      const cur = getPath(currentOptions, f.key);
+      const id = inputId(f.key);
+      if (f.type === 'bool') {
+        html += `<div class="field">
+          <label for="${id}">${esc(f.label)}</label>
+          <div><input type="checkbox" id="${id}" data-key="${f.key}" data-type="bool" ${cur ? 'checked' : ''}></div>
+          ${f.desc ? `<div class="desc">${esc(f.desc)}</div>` : ''}
+        </div>`;
+      } else {
+        const t = (f.type === 'number' || f.type === 'percent') ? 'number' : (f.type === 'password' ? 'password' : 'text');
+        const step = f.step ? ` step="${f.step}"` : (f.type === 'percent' ? ' step="1" min="0" max="100"' : '');
+        let val;
+        if (f.type === 'percent') {
+          const n = (cur == null || cur === '') ? 90 : Math.round(Number(cur) * 100);
+          val = String(isNaN(n) ? 90 : n);
+        } else {
+          val = cur == null ? '' : String(cur);
+        }
+        html += `<div class="field">
+          <label for="${id}">${esc(f.label)}</label>
+          <input type="${t}"${step} id="${id}" data-key="${f.key}" data-type="${f.type}" value="${esc(val)}">
+          ${f.desc ? `<div class="desc">${esc(f.desc)}</div>` : ''}
+        </div>`;
+      }
+    }
+    card.innerHTML = html;
+    form.appendChild(card);
+  }
+  // 绑定测试按钮
+  document.querySelectorAll('button[data-test]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const ch = btn.dataset.test;
       const r = document.getElementById('r-' + ch);
       r.className = 'result'; r.textContent = '';
       btn.disabled = true; btn.textContent = '发送中...';
@@ -179,121 +258,23 @@ async function renderTests() {
   });
 }
 
-// ============= 配置编辑 =============
-// 字段定义：label / type / desc / 路径（在 options 对象里的位置）
-const FIELDS = [
-  {section: '基础配置', items: [
-    {key: 'refresh_token', label: 'refresh_token', type: 'password', desc: '百度 OAuth 授权刷新令牌（必填）'},
-    {key: 'upload_path', label: '上传路径', type: 'text', desc: '网盘中的目标目录，例如 /HomeAssistant/Backup'},
-    {key: 'schedule', label: '定时任务 (Cron)', type: 'text', desc: '5 字段 Cron，例如 0 5 * * * 表示每天凌晨 5 点'},
-  ]},
-  {section: '远端保留策略 (retention)', items: [
-    {key: 'retention.use_folders', label: '启用目录模式', type: 'bool', desc: '开启后按 每日/每周/每月 三个中文目录分类存放'},
-    {key: 'retention.daily', label: '每日保留份数', type: 'number', desc: '同一天多份只保留最新；<=0 表示不启用'},
-    {key: 'retention.weekly', label: '每周保留份数', type: 'number', desc: '同一周只保留最新；<=0 表示不启用'},
-    {key: 'retention.monthly', label: '每月保留份数', type: 'number', desc: '同一月只保留最新；<=0 表示不启用'},
-  ]},
-  {section: '通知 — 全局', items: [
-    {key: 'notifications.enabled', label: '启用通知', type: 'bool', desc: '全局开关；关闭后所有渠道都不发送'},
-    {key: 'notifications.storage_warning_threshold', label: '存储告警阈值', type: 'number', step: '0.01', desc: '0-1 小数；已用比例 >= 该值时触发 storage_warning'},
-  ]},
-  {section: '通知 — 事件开关 (events)', items: [
-    {key: 'notifications.events.backup_success', label: '备份成功', type: 'bool'},
-    {key: 'notifications.events.backup_failure', label: '备份失败', type: 'bool'},
-    {key: 'notifications.events.migration_done', label: '目录迁移完成', type: 'bool'},
-    {key: 'notifications.events.manifest_generated', label: '清单文件生成', type: 'bool'},
-    {key: 'notifications.events.storage_warning', label: '存储空间告警', type: 'bool'},
-  ]},
-  {section: '通知 — 邮箱 (SMTP)', items: [
-    {key: 'notifications.channels.email.enabled', label: '启用邮箱', type: 'bool'},
-    {key: 'notifications.channels.email.smtp_host', label: 'SMTP 服务器', type: 'text', desc: '例如 smtp.gmail.com'},
-    {key: 'notifications.channels.email.smtp_port', label: 'SMTP 端口', type: 'number', desc: 'TLS 用 587，SSL 用 465'},
-    {key: 'notifications.channels.email.use_ssl', label: '使用 SSL', type: 'bool', desc: 'true=SSL(465)，false=TLS(587)'},
-    {key: 'notifications.channels.email.username', label: '用户名', type: 'text'},
-    {key: 'notifications.channels.email.password', label: '密码', type: 'password', desc: '邮箱授权码（不是登录密码）'},
-    {key: 'notifications.channels.email.to_emails', label: '收件人', type: 'text', desc: '多个收件人用逗号分隔'},
-  ]},
-  {section: '通知 — 企业微信', items: [
-    {key: 'notifications.channels.wechat.enabled', label: '启用企业微信', type: 'bool'},
-    {key: 'notifications.channels.wechat.webhook_key', label: 'Webhook Key', type: 'text', desc: '可填 key 本身，也可粘贴完整 Webhook URL'},
-  ]},
-  {section: '通知 — 钉钉', items: [
-    {key: 'notifications.channels.dingtalk.enabled', label: '启用钉钉', type: 'bool'},
-    {key: 'notifications.channels.dingtalk.webhook_url', label: 'Webhook URL', type: 'text', desc: '完整 URL，含 access_token 参数'},
-    {key: 'notifications.channels.dingtalk.secret', label: '加签密钥 (可选)', type: 'password'},
-    {key: 'notifications.channels.dingtalk.at_all', label: '@所有人', type: 'bool'},
-  ]},
-  {section: '通知 — 飞书', items: [
-    {key: 'notifications.channels.feishu.enabled', label: '启用飞书', type: 'bool'},
-    {key: 'notifications.channels.feishu.webhook_url', label: 'Webhook URL', type: 'text', desc: '完整 URL'},
-    {key: 'notifications.channels.feishu.secret', label: '签名密钥 (可选)', type: 'password'},
-  ]},
-];
-
-let currentOptions = {};
-
-function getPath(obj, path) {
-  return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
-}
-function setPath(obj, path, value) {
-  const parts = path.split('.');
-  const last = parts.pop();
-  let cur = obj;
-  for (const p of parts) {
-    if (cur[p] == null || typeof cur[p] !== 'object') cur[p] = {};
-    cur = cur[p];
-  }
-  cur[last] = value;
-}
-
-function inputId(key) { return 'f_' + key.replace(/\./g, '_'); }
-
-async function renderConfig() {
-  const resp = await fetch('./api/config');
-  currentOptions = await resp.json();
-  const form = document.getElementById('config-form');
-  form.innerHTML = '';
-  for (const sec of FIELDS) {
-    const card = document.createElement('div');
-    card.className = 'card';
-    let html = `<div class="section-title">${sec.section}</div>`;
-    for (const f of sec.items) {
-      const cur = getPath(currentOptions, f.key);
-      const id = inputId(f.key);
-      if (f.type === 'bool') {
-        html += `<div class="field">
-          <label for="${id}">${f.label}</label>
-          <div><input type="checkbox" id="${id}" data-key="${f.key}" data-type="bool" ${cur ? 'checked' : ''}></div>
-          ${f.desc ? `<div class="desc">${f.desc}</div>` : ''}
-        </div>`;
-      } else {
-        const t = f.type === 'number' ? 'number' : (f.type === 'password' ? 'password' : 'text');
-        const step = f.step ? ` step="${f.step}"` : '';
-        const val = cur == null ? '' : String(cur);
-        html += `<div class="field">
-          <label for="${id}">${f.label}</label>
-          <input type="${t}"${step} id="${id}" data-key="${f.key}" data-type="${f.type}" value="${val.replace(/"/g,'&quot;')}">
-          ${f.desc ? `<div class="desc">${f.desc}</div>` : ''}
-        </div>`;
-      }
-    }
-    card.innerHTML = html;
-    form.appendChild(card);
-  }
-}
-
 function collectConfig() {
-  // 深拷贝当前 options，逐字段覆盖
   const out = JSON.parse(JSON.stringify(currentOptions));
   document.querySelectorAll('#config-form [data-key]').forEach(el => {
     const key = el.dataset.key;
     const t = el.dataset.type;
     let v;
     if (t === 'bool') v = el.checked;
+    else if (t === 'percent') {
+      const raw = el.value.trim();
+      let n = raw === '' ? 90 : Number(raw);
+      if (isNaN(n)) n = 90;
+      n = Math.max(0, Math.min(100, n));
+      v = Math.round(n) / 100;  // 写回 options 的仍是 0-1 小数
+    }
     else if (t === 'number') {
       const raw = el.value.trim();
-      if (raw === '') v = 0;
-      else v = Number(raw);
+      v = raw === '' ? 0 : Number(raw);
     } else v = el.value;
     setPath(out, key, v);
   });
@@ -319,7 +300,6 @@ document.getElementById('btn-save').addEventListener('click', async () => {
   }
 });
 
-renderTests();
 renderConfig();
 </script></body></html>
 """
@@ -343,7 +323,11 @@ def _build_state() -> Dict[str, Dict[str, Any]]:
 
 
 def _render_html() -> bytes:
-    return _HTML.replace("__CHANNELS_JSON__", json.dumps(CHANNELS)).encode("utf-8")
+    return (
+        _HTML
+        .replace("__CHANNELS_JSON__", json.dumps(CHANNELS))
+        .replace("__CHANNEL_LABELS_JSON__", json.dumps(CHANNEL_LABELS, ensure_ascii=False))
+    ).encode("utf-8")
 
 
 class _Handler(BaseHTTPRequestHandler):
