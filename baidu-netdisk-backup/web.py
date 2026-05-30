@@ -30,6 +30,24 @@ def _load_options() -> Dict[str, Any]:
 
 
 def _save_options(opts: Dict[str, Any]) -> None:
+    """Save options: try Supervisor API first (keeps HA config UI in sync), fallback to file."""
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    if token:
+        try:
+            r = requests.post(
+                "http://supervisor/addons/self/options",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"options": opts},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                log("Web UI: 配置已通过 Supervisor API 同步保存")
+                return
+            log(f"Supervisor API 保存失败 ({r.status_code})，改用文件写入")
+        except Exception as e:
+            log(f"Supervisor API 保存异常（{e}），改用文件写入")
+
+    # fallback: 直接写文件（Supervisor 无法感知，HA 设置页不会同步）
     tmp = CONFIG_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(opts, f, ensure_ascii=False, indent=2)
