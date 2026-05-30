@@ -48,13 +48,15 @@ def _load_options() -> Dict[str, Any]:
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=5,
             )
+            log(f"[debug] GET /addons/self/options → {r.status_code}")
             if r.status_code == 200:
                 data = r.json()
                 opts = data.get("data", {}).get("options", {})
+                log(f"[debug] API 返回 {len(opts)} 个配置项")
                 if opts:
                     return opts
-        except Exception:
-            pass
+        except Exception as e:
+            log(f"[debug] API 读取失败: {e}")
     # fallback
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
