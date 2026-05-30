@@ -44,11 +44,11 @@ def _load_options() -> Dict[str, Any]:
     if token:
         try:
             r = requests.get(
-                "http://supervisor/addons/self/options",
+                "http://supervisor/addons/self/info",
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=5,
             )
-            log(f"[debug] GET /addons/self/options → {r.status_code}")
+            log(f"[debug] GET /addons/self/info → {r.status_code}")
             if r.status_code == 200:
                 data = r.json()
                 opts = data.get("data", {}).get("options", {})
