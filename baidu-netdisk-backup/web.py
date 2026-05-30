@@ -39,6 +39,23 @@ def register_config_reload_callback(callback) -> None:
 
 
 def _load_options() -> Dict[str, Any]:
+    """Load options: Supervisor API first (authoritative), fallback to file."""
+    token = _get_supervisor_token()
+    if token:
+        try:
+            r = requests.get(
+                "http://supervisor/addons/self/options",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=5,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                opts = data.get("data", {}).get("options", {})
+                if opts:
+                    return opts
+        except Exception:
+            pass
+    # fallback
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
