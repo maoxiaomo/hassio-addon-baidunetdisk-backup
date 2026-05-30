@@ -47,57 +47,34 @@ def _load_options() -> Dict[str, Any]:
 
 
 def _get_supervisor_token() -> str:
-    """Get SUPERVISOR_TOKEN: env → /proc/1/environ → Docker socket."""
+    """Get SUPERVISOR_TOKEN: env → s6 container_environment → /proc/1/environ."""
     # 1. 进程自身环境
     token = os.environ.get("SUPERVISOR_TOKEN", "") or os.environ.get("HASSIO_TOKEN", "")
     if token:
-        log("[token] 进程 env 找到")
         return token
 
-    # 2. PID 1 环境（s6-overlay 场景下 Supervisor 注入的变量在 PID 1 中）
+    # 2. s6-overlay 容器环境文件（Supervisor 注入的 Docker env var 被 s6 存储在此）
+    for var_name in ("SUPERVISOR_TOKEN", "HASSIO_TOKEN"):
+        for env_dir in ("/run/s6/container_environment", "/var/run/s6/container_environment"):
+            try:
+                fpath = os.path.join(env_dir, var_name)
+                with open(fpath, "r") as f:
+                    val = f.read().strip()
+                    if val:
+                        return val
+            except Exception:
+                pass
+
+    # 3. PID 1 环境
     try:
         with open("/proc/1/environ", "rb") as f:
             for part in f.read().split(b"\x00"):
                 if part.startswith(b"SUPERVISOR_TOKEN=") or part.startswith(b"HASSIO_TOKEN="):
                     val = part.split(b"=", 1)[1].decode("utf-8", errors="ignore")
                     if val:
-                        log("[token] /proc/1/environ 找到")
                         return val
-    except Exception as e:
-        log(f"[token] /proc/1/environ 失败: {e}")
-
-    # 3. Docker socket（通过容器自身 ID 从 Docker Engine 读取环境变量）
-    try:
-        hostname = open("/etc/hostname", "r").read().strip() or ""
-        sock_exists = os.path.exists("/var/run/docker.sock")
-        log(f"[token] Docker: hostname={hostname[:12]}, sock={sock_exists}")
-        if hostname and sock_exists:
-            import socket as _sock
-            sock = _sock.socket(_sock.AF_UNIX, _sock.SOCK_STREAM)
-            sock.settimeout(3)
-            sock.connect("/var/run/docker.sock")
-            req = f"GET /containers/{hostname}/json HTTP/1.1\r\nHost: localhost\r\n\r\n"
-            sock.sendall(req.encode())
-            resp = b""
-            while True:
-                chunk = sock.recv(4096)
-                if not chunk:
-                    break
-                resp += chunk
-            sock.close()
-            body = resp.split(b"\r\n\r\n", 1)[-1]
-            data = json.loads(body)
-            env_list = (data.get("Config") or {}).get("Env") or []
-            log(f"[token] Docker: 读取到 {len(env_list)} 个环境变量")
-            for env_str in env_list:
-                if env_str.startswith("SUPERVISOR_TOKEN=") or env_str.startswith("HASSIO_TOKEN="):
-                    val = env_str.split("=", 1)[1]
-                    if val:
-                        log("[token] Docker socket 找到")
-                        return val
-            log("[token] Docker: 未在环境变量中找到 SUPERVISOR_TOKEN/HASSIO_TOKEN")
-    except Exception as e:
-        log(f"[token] Docker socket 失败: {e}")
+    except Exception:
+        pass
 
     return ""
 
