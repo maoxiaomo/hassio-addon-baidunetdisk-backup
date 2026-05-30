@@ -51,6 +51,7 @@ def _get_supervisor_token() -> str:
     # 1. 进程自身环境
     token = os.environ.get("SUPERVISOR_TOKEN", "") or os.environ.get("HASSIO_TOKEN", "")
     if token:
+        log("[token] 进程 env 找到")
         return token
 
     # 2. PID 1 环境（s6-overlay 场景下 Supervisor 注入的变量在 PID 1 中）
@@ -60,14 +61,17 @@ def _get_supervisor_token() -> str:
                 if part.startswith(b"SUPERVISOR_TOKEN=") or part.startswith(b"HASSIO_TOKEN="):
                     val = part.split(b"=", 1)[1].decode("utf-8", errors="ignore")
                     if val:
+                        log("[token] /proc/1/environ 找到")
                         return val
-    except Exception:
-        pass
+    except Exception as e:
+        log(f"[token] /proc/1/environ 失败: {e}")
 
     # 3. Docker socket（通过容器自身 ID 从 Docker Engine 读取环境变量）
     try:
         hostname = open("/etc/hostname", "r").read().strip() or ""
-        if hostname and os.path.exists("/var/run/docker.sock"):
+        sock_exists = os.path.exists("/var/run/docker.sock")
+        log(f"[token] Docker: hostname={hostname[:12]}, sock={sock_exists}")
+        if hostname and sock_exists:
             import socket as _sock
             sock = _sock.socket(_sock.AF_UNIX, _sock.SOCK_STREAM)
             sock.settimeout(3)
@@ -83,13 +87,17 @@ def _get_supervisor_token() -> str:
             sock.close()
             body = resp.split(b"\r\n\r\n", 1)[-1]
             data = json.loads(body)
-            for env_str in (data.get("Config") or {}).get("Env") or []:
+            env_list = (data.get("Config") or {}).get("Env") or []
+            log(f"[token] Docker: 读取到 {len(env_list)} 个环境变量")
+            for env_str in env_list:
                 if env_str.startswith("SUPERVISOR_TOKEN=") or env_str.startswith("HASSIO_TOKEN="):
                     val = env_str.split("=", 1)[1]
                     if val:
+                        log("[token] Docker socket 找到")
                         return val
-    except Exception:
-        pass
+            log("[token] Docker: 未在环境变量中找到 SUPERVISOR_TOKEN/HASSIO_TOKEN")
+    except Exception as e:
+        log(f"[token] Docker socket 失败: {e}")
 
     return ""
 
