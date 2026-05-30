@@ -29,9 +29,26 @@ def _load_options() -> Dict[str, Any]:
         return {}
 
 
+def _get_supervisor_token() -> str:
+    """Get SUPERVISOR_TOKEN from env or /proc/1/environ."""
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    if token:
+        return token
+    # 从 PID 1 环境变量读取（s6-overlay / 直接启动场景）
+    try:
+        with open("/proc/1/environ", "rb") as f:
+            for part in f.read().split(b"\x00"):
+                if part.startswith(b"SUPERVISOR_TOKEN="):
+                    return part.split(b"=", 1)[1].decode("utf-8", errors="ignore")
+    except Exception:
+        pass
+    return ""
+
+
 def _save_options(opts: Dict[str, Any]) -> None:
     """Save options: try Supervisor API first (keeps HA config UI in sync), fallback to file."""
-    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    token = _get_supervisor_token()
+    log(f"[debug] save: token={'有('+str(len(token))+'字符)' if token else '无'}")
     if token:
         try:
             r = requests.post(
@@ -56,7 +73,8 @@ def _save_options(opts: Dict[str, Any]) -> None:
 
 def _restart_addon() -> Dict[str, Any]:
     """重启本加载项：先尝试 Supervisor API，失败则强制退出进程让 Supervisor 自动拉起。"""
-    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    token = _get_supervisor_token()
+    log(f"[debug] restart: token={'有('+str(len(token))+'字符)' if token else '无'}")
     if token:
         try:
             r = requests.post(
