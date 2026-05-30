@@ -37,25 +37,30 @@ def _save_options(opts: Dict[str, Any]) -> None:
 
 
 def _restart_addon() -> Dict[str, Any]:
-    """通过 HA Supervisor API 重启本加载项。"""
+    """重启本加载项：先尝试 Supervisor API，失败则强制退出进程让 Supervisor 自动拉起。"""
     token = os.environ.get("SUPERVISOR_TOKEN", "")
-    log(f"[debug] SUPERVISOR_TOKEN={'有('+str(len(token))+'字符)' if token else '空'}")
-    # 列出容器内所有环境变量名（不暴露值）
-    all_vars = sorted(os.environ.keys())
-    log(f"[debug] 容器内全部环境变量({len(all_vars)}个): {all_vars}")
-    if not token:
-        return {"ok": False, "message": "SUPERVISOR_TOKEN 不存在，无法自动重启；请到加载项页面手动重启"}
-    try:
-        r = requests.post(
-            "http://supervisor/addons/self/restart",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        )
-        if r.status_code == 200:
-            return {"ok": True, "message": "已请求 Supervisor 重启加载项"}
-        return {"ok": False, "message": f"Supervisor 返回 {r.status_code}: {r.text[:200]}"}
-    except Exception as e:
-        return {"ok": False, "message": f"调用 Supervisor 失败：{e}"}
+    if token:
+        try:
+            r = requests.post(
+                "http://supervisor/addons/self/restart",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                return {"ok": True, "message": "已请求 Supervisor 重启加载项"}
+            log(f"Supervisor API 返回 {r.status_code}，改用进程退出方式重启")
+        except Exception as e:
+            log(f"Supervisor API 调用失败（{e}），改用进程退出方式重启")
+
+    # SUPERVISOR_TOKEN 不可用时，强制退出进程；boot: auto 会让 Supervisor 自动拉起
+    def _exit_later() -> None:
+        import time as _t
+        _t.sleep(1)  # 等 HTTP 响应发出
+        log("正在退出进程以触发 Supervisor 重启...")
+        os._exit(0)
+
+    threading.Thread(target=_exit_later, daemon=True).start()
+    return {"ok": True, "message": "配置已保存，加载项即将自动重启（约 5 秒后恢复）"}
 
 
 _HTML = r"""<!doctype html>
