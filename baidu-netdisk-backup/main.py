@@ -16,7 +16,7 @@ from retention import (
     _join_remote_dir,
 )
 from sync import sync_all_backups
-from web import start_web_server
+from web import start_web_server, register_config_reload_callback
 
 CONFIG_PATH: str = "/data/options.json"
 
@@ -260,18 +260,14 @@ def _check_storage_warning(
 
 def schedule_loop(
     client: BaiduClient,
-    upload_path: str,
-    retention: Dict[str, Any],
-    retention_use_folders: bool,
-    cron: CronSchedule,
-    notifications: Dict[str, Any],
+    cfg: Dict[str, Any],
 ) -> None:
     """Main scheduling loop — wakes at every cron-matched minute."""
-    log(f"Entering scheduled mode. Cron: {cron.expr!r}")
+    log(f"Entering scheduled mode. Cron: {cfg['cron'].expr!r}")
 
     while True:
         now = datetime.now()
-        target = cron.next_fire(now)
+        target = cfg["cron"].next_fire(now)
 
         seconds_to_wait = (target - now).total_seconds()
         log(
@@ -282,7 +278,10 @@ def schedule_loop(
 
         log("Scheduled execution started")
         try:
-            run_sync_cycle(client, upload_path, retention, retention_use_folders, notifications)
+            run_sync_cycle(
+                client, cfg["upload_path"], cfg["retention"],
+                cfg["retention_use_folders"], cfg["notifications"],
+            )
         except Exception as e:
             log(f"Scheduled upload error: {e}")
 
@@ -328,13 +327,37 @@ def main() -> None:
 
     client = init_client(refresh_token)
 
+    # 可变配置容器 — Web UI 热加载时原地更新此 dict
+    cfg: Dict[str, Any] = {
+        "upload_path": upload_path,
+        "retention": retention,
+        "retention_use_folders": retention_use_folders,
+        "cron": cron,
+        "notifications": notifications,
+    }
+
+    def _reload_config() -> None:
+        """Web UI 保存配置后被调用，原地更新 cfg。"""
+        try:
+            _, new_up, new_ret, new_uf, new_cron, new_notif = load_config()
+            cfg["upload_path"] = new_up
+            cfg["retention"] = new_ret
+            cfg["retention_use_folders"] = new_uf
+            cfg["cron"] = new_cron
+            cfg["notifications"] = new_notif
+            log(f"配置已热加载（cron: {new_cron.expr!r}）")
+        except Exception as e:
+            log(f"配置热加载失败: {e}")
+
     # Web UI（Ingress 通道）— 后台线程，失败不影响主流程
     start_web_server(port=8099)
+    register_config_reload_callback(_reload_config)
 
     log("Running initial sync...")
-    run_sync_cycle(client, upload_path, retention, retention_use_folders, notifications)
+    run_sync_cycle(client, cfg["upload_path"], cfg["retention"],
+                   cfg["retention_use_folders"], cfg["notifications"])
 
-    schedule_loop(client, upload_path, retention, retention_use_folders, cron, notifications)
+    schedule_loop(client, cfg)
 
 
 if __name__ == "__main__":

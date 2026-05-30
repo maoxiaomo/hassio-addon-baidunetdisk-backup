@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Web UI — 两个标签页：通知测试 + 配置编辑（中文界面）。"""
+"""Web UI — 配置编辑 + 通知测试（中文界面）。"""
 import json
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import requests
 
@@ -20,6 +20,23 @@ CHANNEL_LABELS = {
     "feishu": "飞书机器人",
 }
 
+# 热加载：主进程可通过此事件感知配置变更
+_config_reload_event = threading.Event()
+
+
+def register_config_reload_callback(callback) -> None:
+    """供 main.py 注册配置热加载回调。"""
+    def _watcher():
+        while True:
+            _config_reload_event.wait()
+            _config_reload_event.clear()
+            try:
+                callback()
+            except Exception as e:
+                log(f"配置热加载失败: {e}")
+    t = threading.Thread(target=_watcher, name="config-reload", daemon=True)
+    t.start()
+
 
 def _load_options() -> Dict[str, Any]:
     try:
@@ -30,26 +47,58 @@ def _load_options() -> Dict[str, Any]:
 
 
 def _get_supervisor_token() -> str:
-    """Get SUPERVISOR_TOKEN from env or /proc/1/environ."""
-    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    """Get SUPERVISOR_TOKEN: env → /proc/1/environ → Docker socket."""
+    # 1. 进程自身环境
+    token = os.environ.get("SUPERVISOR_TOKEN", "") or os.environ.get("HASSIO_TOKEN", "")
     if token:
         return token
-    # 从 PID 1 环境变量读取（s6-overlay / 直接启动场景）
+
+    # 2. PID 1 环境（s6-overlay 场景下 Supervisor 注入的变量在 PID 1 中）
     try:
         with open("/proc/1/environ", "rb") as f:
             for part in f.read().split(b"\x00"):
-                if part.startswith(b"SUPERVISOR_TOKEN="):
-                    return part.split(b"=", 1)[1].decode("utf-8", errors="ignore")
+                if part.startswith(b"SUPERVISOR_TOKEN=") or part.startswith(b"HASSIO_TOKEN="):
+                    val = part.split(b"=", 1)[1].decode("utf-8", errors="ignore")
+                    if val:
+                        return val
     except Exception:
         pass
+
+    # 3. Docker socket（通过容器自身 ID 从 Docker Engine 读取环境变量）
+    try:
+        hostname = open("/etc/hostname", "r").read().strip() or ""
+        if hostname and os.path.exists("/var/run/docker.sock"):
+            import socket as _sock
+            sock = _sock.socket(_sock.AF_UNIX, _sock.SOCK_STREAM)
+            sock.settimeout(3)
+            sock.connect("/var/run/docker.sock")
+            req = f"GET /containers/{hostname}/json HTTP/1.1\r\nHost: localhost\r\n\r\n"
+            sock.sendall(req.encode())
+            resp = b""
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                resp += chunk
+            sock.close()
+            body = resp.split(b"\r\n\r\n", 1)[-1]
+            data = json.loads(body)
+            for env_str in (data.get("Config") or {}).get("Env") or []:
+                if env_str.startswith("SUPERVISOR_TOKEN=") or env_str.startswith("HASSIO_TOKEN="):
+                    val = env_str.split("=", 1)[1]
+                    if val:
+                        return val
+    except Exception:
+        pass
+
     return ""
 
 
 def _save_options(opts: Dict[str, Any]) -> None:
-    """Save options: try Supervisor API first (keeps HA config UI in sync), fallback to file."""
+    """Save options: try Supervisor API (syncs to HA native UI), fallback to file."""
     token = _get_supervisor_token()
-    log(f"[debug] save: token={'有('+str(len(token))+'字符)' if token else '无'}")
     if token:
+        log(f"Web UI: 检测到 Supervisor Token（{len(token)} 字符），尝试 API 同步")
         try:
             r = requests.post(
                 "http://supervisor/addons/self/options",
@@ -58,45 +107,24 @@ def _save_options(opts: Dict[str, Any]) -> None:
                 timeout=10,
             )
             if r.status_code == 200:
-                log("Web UI: 配置已通过 Supervisor API 同步保存")
+                log("Web UI: 配置已同步保存（HA 原生设置页已更新）")
+                _config_reload_event.set()
                 return
-            log(f"Supervisor API 保存失败 ({r.status_code})，改用文件写入")
+            log(f"Supervisor API 返回 {r.status_code}，改用文件写入")
         except Exception as e:
-            log(f"Supervisor API 保存异常（{e}），改用文件写入")
+            log(f"Supervisor API 异常（{e}），改用文件写入")
+    else:
+        log("Web UI: 未找到 Supervisor Token，直接写文件（HA 原生设置页不会同步）")
 
-    # fallback: 直接写文件（Supervisor 无法感知，HA 设置页不会同步）
+    # fallback: 直接写文件
     tmp = CONFIG_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(opts, f, ensure_ascii=False, indent=2)
     os.replace(tmp, CONFIG_PATH)
+    log("Web UI: 配置已保存到文件")
+    _config_reload_event.set()
 
 
-def _restart_addon() -> Dict[str, Any]:
-    """重启本加载项：先尝试 Supervisor API，失败则强制退出进程让 Supervisor 自动拉起。"""
-    token = _get_supervisor_token()
-    log(f"[debug] restart: token={'有('+str(len(token))+'字符)' if token else '无'}")
-    if token:
-        try:
-            r = requests.post(
-                "http://supervisor/addons/self/restart",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=10,
-            )
-            if r.status_code == 200:
-                return {"ok": True, "message": "已请求 Supervisor 重启加载项"}
-            log(f"Supervisor API 返回 {r.status_code}，改用进程退出方式重启")
-        except Exception as e:
-            log(f"Supervisor API 调用失败（{e}），改用进程退出方式重启")
-
-    # SUPERVISOR_TOKEN 不可用时，强制退出进程；boot: auto 会让 Supervisor 自动拉起
-    def _exit_later() -> None:
-        import time as _t
-        _t.sleep(1)  # 等 HTTP 响应发出
-        log("正在退出进程以触发 Supervisor 重启...")
-        os._exit(0)
-
-    threading.Thread(target=_exit_later, daemon=True).start()
-    return {"ok": True, "message": "配置已保存，加载项即将自动重启（约 5 秒后恢复）"}
 
 
 _HTML = r"""<!doctype html>
@@ -155,11 +183,11 @@ body{padding-bottom:90px}  /* 给底部按钮栏留空间 */
   <div class="inner">
     <div class="grow"></div>
     <button class="secondary" id="btn-reload">重新加载</button>
-    <button class="big" id="btn-save">保存并重启加载项</button>
+    <button class="big" id="btn-save">保存配置</button>
   </div>
 </div>
 <div class="result" id="r-save"></div>
-<div class="foot">保存后会自动调用 HA Supervisor 重启本加载项使配置生效；若 Supervisor 不可用，请手动到加载项页面【重启】。测试通知按钮基于<b>当前已保存</b>的配置发送，未保存的修改不影响测试结果。</div>
+<div class="foot">保存后配置<strong>立即生效</strong>（无需重启）。测试通知按钮基于<b>当前已保存</b>的配置发送，未保存的修改不影响测试结果。<br>注意：本页面保存的配置不会同步到 HA 原生【配置】标签页；如需一致，请在两个页面分别保存。</div>
 
 <script>
 const CHANNELS = __CHANNELS_JSON__;
@@ -451,14 +479,11 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             try:
                 _save_options(new_opts)
-                log("Web UI: 配置已保存，准备重启加载项")
             except Exception as e:
                 log(f"Web UI: 配置保存失败：{e}")
                 self._send_json(500, {"ok": False, "message": f"配置保存失败：{e}"})
                 return
-            r = _restart_addon()
-            msg = ("配置已保存，" + r["message"]) if r["ok"] else ("配置已保存，但 " + r["message"])
-            self._send_json(200, {"ok": True, "message": msg})
+            self._send_json(200, {"ok": True, "message": "配置已保存并立即生效"})
             return
 
         self._send_json(404, {"ok": False, "message": "not found"})
