@@ -40,9 +40,9 @@ def _restart_addon() -> Dict[str, Any]:
     """通过 HA Supervisor API 重启本加载项。"""
     token = os.environ.get("SUPERVISOR_TOKEN", "")
     log(f"[debug] SUPERVISOR_TOKEN={'有('+str(len(token))+'字符)' if token else '空'}")
-    # 列出所有含 token/hassio 的环境变量名（不暴露值）
-    matching = [k for k in os.environ if "TOKEN" in k.upper() or "HASSIO" in k.upper() or "SUPERVISOR" in k.upper()]
-    log(f"[debug] 相关环境变量名: {matching}")
+    # 列出容器内所有环境变量名（不暴露值）
+    all_vars = sorted(os.environ.keys())
+    log(f"[debug] 容器内全部环境变量({len(all_vars)}个): {all_vars}")
     if not token:
         return {"ok": False, "message": "SUPERVISOR_TOKEN 不存在，无法自动重启；请到加载项页面手动重启"}
     try:
