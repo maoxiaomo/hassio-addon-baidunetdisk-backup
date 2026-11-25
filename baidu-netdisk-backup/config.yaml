@@ -1,5 +1,5 @@
 name: "百度网盘备份 (Baidu Netdisk Backup)"
-version: "1.2.7"
+version: "1.3.1"
 slug: "baidu_netdisk_backup"
 description: "自动将 Home Assistant 备份文件上传到百度网盘 (正式版)"
 url: "https://gitee.com/mxmaimooo/hassio-addon-baidunetdisk-backup"
@@ -29,6 +29,17 @@ options:
     daily: 7
     weekly: 4
     monthly: 12
+    # ── v1.3.1 S1 护栏（新增可选键）────────────────────────────────
+    protect_manual: true          # 只删自动命名、且名字时间≈文件时间的备份
+    max_delete_per_run: 10        # 每轮最多删 N 个（最旧优先），剩余下轮继续；最小 1
+    dry_run: false                # 演练：不删、不移、不迁移
+  # ── v1.3.1 S2 重试预算（新增可选键；整段可缺省）──────────────────
+  retry:
+    deadline_seconds: 90          # 单操作墙钟预算（秒）
+    cycle_budget_seconds: 1800    # 整轮预算上限（秒）；schedule 触发时会向下收缩
+  # ── v1.3.1 S3 缓存核对（新增可选键；整段可缺省）──────────────────
+  sync:
+    recheck_days: 7               # 每隔 N 天与云端核对一次缓存
   # 通知配置 — 下方提供默认占位，实际值请按需填写
   notifications:
     enabled: true
@@ -39,6 +50,9 @@ options:
       migration_done: false
       manifest_generated: false
       storage_warning: false
+      # v1.3.1 新增的两个事件开关（缺省时由 notifier.DEFAULT_EVENT_ENABLED 兜底）
+      backup_empty: true             # 源端为空是异常态，默认提示
+      retention_guard: true          # 护栏跳过/部分删除时提示
     channels:
       email:
         enabled: false
@@ -70,6 +84,16 @@ schema:
     daily: int?
     weekly: int?
     monthly: int?
+    # v1.3.1 护栏：max_delete_per_run 最小 1（0 不再表示"不限"）
+    protect_manual: bool?
+    max_delete_per_run: int(1,1000)?
+    dry_run: bool?
+  # 整段可选：老 options.json 没有这两个段落，缺省时由 parse_options() 兜底
+  retry?:
+    deadline_seconds: float?
+    cycle_budget_seconds: float?
+  sync?:
+    recheck_days: float?
   # 通知配置 schema
   notifications:
     enabled: bool?
@@ -80,6 +104,8 @@ schema:
       migration_done: bool?
       manifest_generated: bool?
       storage_warning: bool?
+      backup_empty: bool?
+      retention_guard: bool?
     channels:
       email:
         enabled: bool?

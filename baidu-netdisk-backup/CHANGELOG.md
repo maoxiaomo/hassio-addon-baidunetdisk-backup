@@ -1,3 +1,40 @@
+## 1.3.1
+
+### 修复（静默失败）
+- **失败通知结构性不可达**：`sync` 不再把缓存命中计入成功数，改为 `outcome`（ok/partial/failed/empty）穷举判定；
+  上传失败会记录到 `failed_files` 并**保证发出一条** `backup_failure`，消息里的数字自洽（不再出现「成功上传 2 / 跳过 2 / 失败 1 / 总数 3」）。
+- **失败原因丢失**：`upload_file` 不再把异常压成 `False`，抛出 `UploadError` 并带上最后一次的具体原因。
+
+### 修复（重试与容错）
+- `precreate` / `merge` / `list` / `create dir` / 批量 filemanager 全部纳入重试，预算按**墙钟 90 秒**而非次数
+  （实测 11-19 中断 83 秒、11-25 中断 44 秒，旧的「3 次 × 13 秒 = 39 秒」覆盖不了）。
+- 区分可重试（`EAI_AGAIN`、RST、超时、非 JSON 响应）与永久错误（4xx、明确 errno），永久错误立即失败不空转。
+- 分片循环每个分片前检查整轮预算，避免单文件跑成小时级。
+
+### 修复（数据安全）
+- **保留策略不再删用户手工备份**：只删 `automatic_backup_*` / `Automatic_backup_*` 且要求名字时间与文件时间相差 <6 小时；
+  无法定级的文件一律不删。新增 `retention.protect_manual`（默认 true）。
+- **删除有上限**：`retention.max_delete_per_run`（默认 10），最旧优先、每轮删一批，剩余下轮继续；不再一次清空。
+- **`dry_run`**：演练模式，不删、不移、不迁移、不建目录。
+- **`list` 失败不再当成「空目录」**：`errno=-9` 才视为确认的空；其余上抛，清单生成中止而不是写「0 个文件」。
+- 目录迁移：`move` 失败不再删源目录、不再写 `migration_done.flag`。
+- `create_remote_dir`：先看 `errno`，修复「鉴权失败（-6）被误判成目录已存在」的假阳性。
+
+### 修复（缓存与配置）
+- 缓存主文件格式**保持 `true` 不变**，核对信息存旁路 `upload_cache_meta.json`（`schema=2`）→ 回滚零步骤。
+- 云端文件被删后可自愈：每 `sync.recheck_days`（默认 7 天）惰性核对一次，缺失即重传；不是每轮全量 list。
+- 配置热加载读到旧值：保存时三写（Supervisor API + `/data/options.json` + 内存），API 失败时界面**如实返回失败**而不是谎报成功。
+- Web UI 新增「立即同步」（`POST /api/sync`，600 秒最小间隔）与同步状态显示。
+
+### 新增配置项（全部可选，老配置直接可用）
+`retention.protect_manual` / `retention.max_delete_per_run` / `retention.dry_run` /
+`retry.deadline_seconds` / `retry.cycle_budget_seconds` / `sync.recheck_days` /
+`notifications.events.backup_empty` / `notifications.events.retention_guard`
+
+### 测试
+- 新增 52 条离线用例（stub 掉 requests），覆盖失败通知、重试预算、保留护栏、缓存自愈、web 保存与手动同步。
+- 已用变异测试验证：把关键修复逐个改坏，对应用例会变红。
+
 # Changelog
 
 ## 1.2.3
