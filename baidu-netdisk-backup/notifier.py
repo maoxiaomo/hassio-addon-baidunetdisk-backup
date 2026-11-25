@@ -46,7 +46,42 @@ EVENT_TYPES: list = [
     "migration_done",
     "manifest_generated",
     "storage_warning",
+    "backup_empty",
+    "retention_guard",
 ]
+
+# 事件级开关的默认值（options.json 里缺这个键时的兜底）
+# 与 config.yaml 的 options 默认值对齐的部分：backup_empty / retention_guard /
+# migration_done / manifest_generated。storage_warning 保持 True（老配置基本都显式
+# 设置了它；这里只影响"从未设置"的配置，取安全侧 = 会告警）。
+DEFAULT_EVENT_ENABLED: dict = {
+    "backup_success": True,
+    "backup_failure": True,
+    "storage_warning": True,
+    # 空目录是异常态而不是正常态：源端变空必须让人知道（P1-8）
+    "backup_empty": True,
+    "retention_guard": True,   # 护栏跳过/部分删除必须让人知道
+    # 这两个是"信息性"事件，默认关，避免把结果通知淹没
+    "migration_done": False,
+    "manifest_generated": False,
+}
+
+
+def event_enabled(notifications: Dict[str, Any], event_type: str) -> bool:
+    """判断某事件当前是否会真的发出去（供调用方决定"兜底通知"）。
+
+    与 ``notify_event`` 内部判定保持同一逻辑，避免"主事件被用户关掉 +
+    有护栏事件"时整轮静默。
+    """
+    if not isinstance(notifications, dict):
+        return False
+    if not notifications.get("enabled", True):
+        return False
+    events_cfg = notifications.get("events", {})
+    default = DEFAULT_EVENT_ENABLED.get(event_type, True)
+    if isinstance(events_cfg, dict):
+        return bool(events_cfg.get(event_type, default))
+    return default
 
 
 # ============================================================================
@@ -375,24 +410,102 @@ def _format_event_message(
 
     if event_type == "backup_success":
         total = event_data.get("total_count", 0)
-        success = event_data.get("success_count", 0)
+        uploaded = event_data.get("uploaded_count")
+        if uploaded is None:               # 兼容旧调用方
+            uploaded = event_data.get("success_count", 0)
         skipped = event_data.get("skipped_count", 0)
+        failed = event_data.get("failed_count", 0)
         upload_path = event_data.get("upload_path", "/HomeAssistant/Backup")
         title = "✅ HA 备份同步成功"
-        content = (
-            f"时间：{now_str}\n"
-            f"目标路径：{upload_path}\n"
-            f"文件总数：{total}\n"
-            f"成功上传：{success}\n"
-            f"跳过（已存在）：{skipped}\n"
-            f"失败：{total - success}"
-        )
+        lines = [
+            f"时间：{now_str}",
+            f"目标路径：{upload_path}",
+            f"扫描文件：{total}",
+            f"本次上传：{uploaded}",
+            f"跳过（已上传）：{skipped}",
+            f"失败：{failed}",
+        ]
+        if total and total != uploaded + skipped + failed:
+            lines.append(
+                f"（注意：分项之和 {uploaded + skipped + failed} 与扫描数 {total} 不一致，"
+                f"请查看加载项日志）"
+            )
+        guard = event_data.get("guard")
+        if guard:
+            lines.append("")
+            lines.append(f"⚠️ 保留策略：{guard}")
+        content = "\n".join(lines)
 
     elif event_type == "backup_failure":
-        error_msg = event_data.get("error", "未知错误")
+        error_msg = event_data.get("error") or "未知错误"
         upload_path = event_data.get("upload_path", "/HomeAssistant/Backup")
+        stage = event_data.get("stage") or "上传"
+        total = event_data.get("total_count", 0)
+        uploaded = event_data.get("uploaded_count", 0)
+        skipped = event_data.get("skipped_count", 0)
+        failed = event_data.get("failed_count", 0)
         title = "❌ HA 备份同步失败"
-        content = f"时间：{now_str}\n目标路径：{upload_path}\n错误信息：{error_msg}"
+        verdict = (
+            f"{failed}/{total} 个文件未完成上传"
+            if failed
+            else "文件上传已完成，失败发生在后续步骤"
+        )
+        lines = [
+            f"时间：{now_str}",
+            f"目标路径：{upload_path}",
+            f"阶段：{stage}",
+            f"结论：{verdict}",
+        ]
+        if total:
+            lines.extend(
+                [
+                    f"扫描文件：{total}",
+                    f"本次上传：{uploaded}",
+                    f"跳过（已上传）：{skipped}",
+                    f"失败：{failed}",
+                ]
+            )
+        lines.append(f"错误：{error_msg}")
+        failed_files = event_data.get("failed_files") or []
+        for item in failed_files[:10]:
+            lines.append(f"  - {item.get('name')}：{item.get('error')}")
+        if len(failed_files) > 10:
+            lines.append(f"  ……另有 {len(failed_files) - 10} 个，详见日志")
+        guard = event_data.get("guard")
+        if guard:
+            lines.append("")
+            lines.append(f"⚠️ 保留策略：{guard}")
+        content = "\n".join(lines)
+
+    elif event_type == "backup_empty":
+        upload_path = event_data.get("upload_path", "/HomeAssistant/Backup")
+        title = "⚠️ HA 备份目录为空"
+        content = "\n".join(
+            [
+                f"时间：{now_str}",
+                f"目标路径：{upload_path}",
+                "说明：/backup 下没有任何 .tar 文件，本次未上传任何内容。",
+                "若这不是预期行为，请检查 HA 的备份计划或 /backup 挂载。",
+            ]
+        )
+
+    elif event_type == "retention_guard":
+        title = "⚠️ 远端保留策略未按预期执行"
+        content = "\n".join(
+            [
+                f"时间：{now_str}",
+                f"目标路径：{event_data.get('upload_path', '/HomeAssistant/Backup')}",
+                f"待删除候选：{event_data.get('candidates', 0)}",
+                f"受保护文件：{event_data.get('protected', 0)}",
+                f"原因：{event_data.get('guard') or event_data.get('error') or '未知'}",
+                (
+                    f"同步结果：outcome={event_data.get('outcome')} "
+                    f"扫描 {event_data.get('total_count', 0)} / "
+                    f"上传 {event_data.get('uploaded_count', 0)} / "
+                    f"失败 {event_data.get('failed_count', 0)}"
+                ),
+            ]
+        )
 
     elif event_type == "migration_done":
         from_dir = event_data.get("from_dir", "")
@@ -519,9 +632,10 @@ def notify_event(
         _log("全局通知已禁用，跳过通知发送")
         return {"sent": 0, "failed": 0, "skipped": 0, "results": {}}
 
-    # 事件级开关
+    # 事件级开关（新事件用 DEFAULT_EVENT_ENABLED 的默认值，既有事件仍默认 True）
     events_cfg = notif.get("events", {})
-    if isinstance(events_cfg, dict) and not events_cfg.get(event_type, True):
+    default_enabled = DEFAULT_EVENT_ENABLED.get(event_type, True)
+    if isinstance(events_cfg, dict) and not events_cfg.get(event_type, default_enabled):
         _log(f"事件类型 {event_type} 的通知已禁用，跳过")
         return {"sent": 0, "failed": 0, "skipped": 0, "results": {}}
 

@@ -3,6 +3,7 @@
 import json
 import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional
 
@@ -22,6 +23,82 @@ CHANNEL_LABELS = {
 
 # 热加载：主进程可通过此事件感知配置变更
 _config_reload_event = threading.Event()
+
+# v1.3.0：Web UI 刚提交的 options（热加载优先用它，避免回读到旧文件）
+_pending_options: Optional[Dict[str, Any]] = None
+_pending_lock = threading.Lock()
+
+# v1.3.0：手动同步请求 + 运行状态
+_manual_sync_event = threading.Event()
+_status_lock = threading.Lock()
+_sync_status: Dict[str, Any] = {
+    "running": False,
+    "trigger": None,
+    "started": None,
+    "finished": None,
+    "outcome": None,
+    "failed_count": 0,
+}
+
+
+def take_pending_options() -> Optional[Dict[str, Any]]:
+    """取走"Web UI 刚保存的那份配置"，没有则返回 None。"""
+    global _pending_options
+    with _pending_lock:
+        opts = _pending_options
+        _pending_options = None
+    return opts
+
+
+def publish_sync_status(partial: Dict[str, Any]) -> None:
+    """主进程回写同步状态（供页面展示）。"""
+    with _status_lock:
+        _sync_status.update(partial or {})
+
+
+def get_sync_status() -> Dict[str, Any]:
+    with _status_lock:
+        return dict(_sync_status)
+
+
+# 手动同步的最小间隔（秒）：防止"同步中再点一次 → 本轮结束立刻又跑一整轮"
+MANUAL_SYNC_MIN_INTERVAL: float = 600.0
+_manual_sync_last_at: Optional[float] = None
+
+
+def request_manual_sync(
+    min_interval: float = MANUAL_SYNC_MIN_INTERVAL,
+) -> Dict[str, Any]:
+    """请求一次手动同步。
+
+    Returns:
+        ``{"ok": bool, "message": str}`` —— 正在运行 / 过于频繁 / 已排队。
+
+    v1.3.1（P1-3）：加最小间隔。v1.3.0 只挡"running"，同步中再点一次会把
+    Event 置位，本轮一结束立刻又跑一整轮，无节流。
+    """
+    global _manual_sync_last_at
+    now = time.monotonic()
+    with _status_lock:
+        if _sync_status.get("running"):
+            return {"ok": False, "message": "已有同步任务在运行，请稍后再试"}
+        if _manual_sync_last_at is not None and (now - _manual_sync_last_at) < min_interval:
+            wait = int(min_interval - (now - _manual_sync_last_at)) + 1
+            return {
+                "ok": False,
+                "message": f"手动同步过于频繁，请 {wait} 秒后再试（最小间隔 {int(min_interval)} 秒）",
+            }
+        _manual_sync_last_at = now
+        _manual_sync_event.set()
+    return {"ok": True, "message": "已排队，将在数秒内开始同步"}
+
+
+def wait_for_manual_sync(timeout: float) -> bool:
+    """阻塞至多 *timeout* 秒；被手动请求唤醒时返回 True。"""
+    fired = _manual_sync_event.wait(timeout)
+    if fired:
+        _manual_sync_event.clear()
+    return fired
 
 
 def register_config_reload_callback(callback) -> None:
@@ -98,9 +175,28 @@ def _get_supervisor_token() -> str:
     return ""
 
 
-def _save_options(opts: Dict[str, Any]) -> None:
-    """Save options: try Supervisor API (syncs to HA native UI), fallback to file."""
+def _write_options_file(opts: Dict[str, Any]) -> None:
+    """原子写入 /data/options.json。"""
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(opts, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, CONFIG_PATH)
+
+
+def _save_options(opts: Dict[str, Any]) -> Dict[str, Any]:
+    """Save options: Supervisor API + 本地落盘 + 内存 pending（三者都做）。
+
+    Returns:
+        ``{"api_ok": bool, "file_ok": bool, "api_error": str}``
+
+    v1.3.1（P1-10）：API 失败不得回"已保存并立即生效"。Supervisor 只在重启/重建
+    时用自己那份 options 覆盖 /data/options.json，所以"仅本地生效"必须写明
+    "重启会回退"。
+    """
+    global _pending_options
     token = _get_supervisor_token()
+    api_ok = False
+    api_error = ""
     if token:
         log(f"Web UI: 检测到 Supervisor Token（{len(token)} 字符），尝试 API 同步")
         try:
@@ -111,22 +207,37 @@ def _save_options(opts: Dict[str, Any]) -> None:
                 timeout=10,
             )
             if r.status_code == 200:
+                api_ok = True
                 log("Web UI: 配置已同步保存（HA 原生设置页已更新）")
-                _config_reload_event.set()
-                return
-            log(f"Supervisor API 返回 {r.status_code}，改用文件写入")
+            else:
+                api_error = f"Supervisor API 返回 {r.status_code}"
+                log(f"Web UI: {api_error}，改用文件写入")
         except Exception as e:
-            log(f"Supervisor API 异常（{e}），改用文件写入")
+            api_error = f"Supervisor API 异常：{e}"
+            log(f"Web UI: {api_error}，改用文件写入")
     else:
+        api_error = "未找到 Supervisor Token"
         log("Web UI: 未找到 Supervisor Token，直接写文件（HA 原生设置页不会同步）")
 
-    # fallback: 直接写文件
-    tmp = CONFIG_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(opts, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, CONFIG_PATH)
-    log("Web UI: 配置已保存到文件")
+    # 无论 API 是否成功，都把同一份 payload 落到本地文件：
+    # 这样 load_config() 读文件时不会拿到旧值。
+    file_ok = False
+    try:
+        _write_options_file(opts)
+        file_ok = True
+        if api_ok:
+            log("Web UI: 配置已同步写入 options.json（与 API 内容一致）")
+        else:
+            log("Web UI: 配置已保存到文件（仅本地生效，重建加载项后会回退）")
+    except Exception as e:
+        if not api_ok:
+            raise
+        log(f"Web UI: 本地文件写入失败（API 已成功）：{e}")
+
+    with _pending_lock:
+        _pending_options = dict(opts)
     _config_reload_event.set()
+    return {"api_ok": api_ok, "file_ok": file_ok, "api_error": api_error}
 
 
 
@@ -185,12 +296,15 @@ body{padding-bottom:90px}  /* 给底部按钮栏留空间 */
 
 <div class="actions">
   <div class="inner">
+    <span class="state" id="sync-state">尚未同步</span>
     <div class="grow"></div>
+    <button class="secondary" id="btn-sync">立即同步</button>
     <button class="secondary" id="btn-reload">重新加载</button>
     <button class="big" id="btn-save">保存配置</button>
   </div>
 </div>
 <div class="result" id="r-save"></div>
+<div class="result" id="r-sync"></div>
 <div class="foot">保存后配置<strong>立即生效</strong>（无需重启）。测试通知按钮基于<b>当前已保存</b>的配置发送，未保存的修改不影响测试结果。<br>注意：本页面保存的配置不会同步到 HA 原生【配置】标签页；如需一致，请在两个页面分别保存。</div>
 
 <script>
@@ -213,8 +327,17 @@ const FIELDS = [
     {key: 'retention.weekly', label: '每周保留份数', type: 'number', desc: '同一周只保留最新；<=0 表示不启用'},
     {key: 'retention.monthly', label: '每月保留份数', type: 'number', desc: '同一月只保留最新；<=0 表示不启用'},
   ]},
+  {section: '保留策略护栏', items: [
+    {key: 'retention.protect_manual', label: '保护手工备份', type: 'bool', desc: '只删除 automatic_backup_* 且名字时间与文件时间一致（±6h）的自动备份；手工备份永不删除'},
+    {key: 'retention.max_delete_per_run', label: '单次最多删除', type: 'number', min: 1, fallback: 10, desc: '每轮最多删这么多个（最旧优先），剩余的下轮继续；最小 1，清空按 10 处理'},
+    {key: 'retention.dry_run', label: '演练模式 (dry-run)', type: 'bool', desc: '只记录将删除/将移动的文件，不删不移（含旧目录迁移与层级晋升）'},
+    {key: 'sync.recheck_days', label: '缓存核对周期 (天)', type: 'number', desc: '每隔 N 天与云端核对一次缓存；发现云端缺失则重传'},
+    {key: 'retry.deadline_seconds', label: '单操作重试预算 (秒)', type: 'number', desc: '默认 90；DNS/RST/超时在该预算内重试，永久错误立即失败'},
+  ]},
   {section: '通知 — 全局', items: [
     {key: 'notifications.enabled', label: '启用通知', type: 'bool', desc: '全局开关；关闭后所有渠道都不发送'},
+    {key: 'notifications.events.backup_empty', label: '备份目录为空', type: 'bool', desc: '默认开启；/backup 无 .tar 时提示（空目录同时会跳过保留策略）'},
+    {key: 'notifications.events.retention_guard', label: '保留策略护栏告警', type: 'bool', desc: '跳过删除时提示（默认开启）'},
   ]},
   {section: '通知 — 事件开关 (events)', items: [
     {key: 'notifications.events.backup_success', label: '备份成功', type: 'bool'},
@@ -273,6 +396,7 @@ async function renderConfig() {
   const [cRes, sRes] = await Promise.all([fetch('./api/config'), fetch('./api/state')]);
   currentOptions = await cRes.json();
   currentState = await sRes.json();
+  renderSyncState();
   const form = document.getElementById('config-form');
   form.innerHTML = '';
   for (const sec of FIELDS) {
@@ -302,7 +426,8 @@ async function renderConfig() {
         </div>`;
       } else {
         const t = (f.type === 'number' || f.type === 'percent') ? 'number' : (f.type === 'password' ? 'password' : 'text');
-        const step = f.step ? ` step="${f.step}"` : (f.type === 'percent' ? ' step="1" min="0" max="100"' : '');
+        let step = f.step ? ` step="${f.step}"` : (f.type === 'percent' ? ' step="1" min="0" max="100"' : '');
+        if (f.type === 'number' && f.min != null) step += ` min="${f.min}"`;
         let val;
         if (f.type === 'percent') {
           const n = (cur == null || cur === '') ? 90 : Math.round(Number(cur) * 100);
@@ -312,7 +437,7 @@ async function renderConfig() {
         }
         html += `<div class="field">
           <label for="${id}">${esc(f.label)}</label>
-          <input type="${t}"${step} id="${id}" data-key="${f.key}" data-type="${f.type}" value="${esc(val)}">
+          <input type="${t}"${step} id="${id}" data-key="${f.key}" data-type="${f.type}" data-fallback="${f.fallback != null ? f.fallback : ''}" value="${esc(val)}">
           ${f.desc ? `<div class="desc">${esc(f.desc)}</div>` : ''}
         </div>`;
       }
@@ -357,13 +482,52 @@ function collectConfig() {
       v = Math.round(n) / 100;  // 写回 options 的仍是 0-1 小数
     }
     else if (t === 'number') {
+      // v1.3.1：数字框被清空时不能变成 0（0 曾等于"不限"，等于一键关掉护栏）
       const raw = el.value.trim();
-      v = raw === '' ? 0 : Number(raw);
+      const fb = el.dataset.fallback === '' ? null : Number(el.dataset.fallback);
+      let n = raw === '' ? (fb == null ? 0 : fb) : Number(raw);
+      if (!Number.isFinite(n)) n = (fb == null ? 0 : fb);
+      if (fb != null && n < fb) n = fb;
+      v = n;
     } else v = el.value;
     setPath(out, key, v);
   });
   return out;
 }
+
+function renderSyncState() {
+  const st = (currentState && currentState.sync) || {};
+  const el = document.getElementById('sync-state');
+  if (!el) return;
+  if (st.running) {
+    el.className = 'state on';
+    el.textContent = '同步中…（' + (st.trigger || '') + '）';
+  } else if (st.finished) {
+    el.className = 'state';
+    el.textContent = '上次同步：' + st.finished + ' → ' + (st.outcome || '?');
+  } else {
+    el.className = 'state';
+    el.textContent = '尚未同步';
+  }
+}
+
+document.getElementById('btn-sync').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-sync');
+  const r = document.getElementById('r-sync');
+  r.className = 'result'; r.textContent = '';
+  btn.disabled = true; btn.textContent = '同步中...';
+  try {
+    const resp = await fetch('./api/sync', {method: 'POST'});
+    const data = await resp.json();
+    r.className = 'result ' + (data.ok ? 'ok' : 'err');
+    r.textContent = (data.ok ? '✅ ' : '❌ ') + (data.message || '');
+    setTimeout(renderConfig, 1500);
+  } catch (e) {
+    r.className = 'result err'; r.textContent = '❌ 请求失败：' + e;
+  } finally {
+    btn.disabled = false; btn.textContent = '立即同步';
+  }
+});
 
 document.getElementById('btn-reload').addEventListener('click', renderConfig);
 document.getElementById('btn-save').addEventListener('click', async () => {
@@ -380,7 +544,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
   } catch (e) {
     r.className = 'result err'; r.textContent = '❌ 请求失败：' + e;
   } finally {
-    btn.disabled = false; btn.textContent = '保存并重启加载项';
+    btn.disabled = false; btn.textContent = '保存配置';
   }
 });
 
@@ -403,6 +567,7 @@ def _build_state() -> Dict[str, Dict[str, Any]]:
         else:
             filled = bool(cfg.get("webhook_url"))
         out[ch] = {"enabled": enabled, "filled": filled, "label": CHANNEL_LABELS[ch]}
+    out["sync"] = get_sync_status()
     return out
 
 
@@ -470,6 +635,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": bool(ok), "message": "测试通知已发送" if ok else "发送失败，请查看加载项日志"})
             return
 
+        # POST /api/sync — 手动触发一次同步（不新增依赖，走内嵌页）
+        if path.endswith("/api/sync"):
+            result = request_manual_sync()
+            self._send_json(200, result)
+            return
+
         # POST /api/config — 保存并重启
         if path.endswith("/api/config"):
             try:
@@ -482,12 +653,30 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"ok": False, "message": f"请求体解析失败：{e}"})
                 return
             try:
-                _save_options(new_opts)
+                saved = _save_options(new_opts)
             except Exception as e:
                 log(f"Web UI: 配置保存失败：{e}")
                 self._send_json(500, {"ok": False, "message": f"配置保存失败：{e}"})
                 return
-            self._send_json(200, {"ok": True, "message": "配置已保存并立即生效"})
+            if saved.get("api_ok"):
+                self._send_json(
+                    200,
+                    {"ok": True, "message": "配置已保存到 HA 并立即生效（重启后仍然有效）"},
+                )
+            else:
+                reason = saved.get("api_error") or "未知原因"
+                self._send_json(
+                    200,
+                    {
+                        "ok": False,
+                        "message": (
+                            f"配置仅在本进程内生效并已写入 /data/options.json，"
+                            f"但未能同步到 HA（{reason}）。"
+                            "重建/重启加载项后会静默回退到 HA 的旧配置，请到 HA 原生"
+                            "【配置】页确认保存。"
+                        ),
+                    },
+                )
             return
 
         self._send_json(404, {"ok": False, "message": "not found"})
