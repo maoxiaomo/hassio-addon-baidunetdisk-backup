@@ -248,20 +248,21 @@ _HTML = r"""<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>百度网盘备份</title>
 <style>
-:root{color-scheme:light dark}
+:root{color-scheme:dark}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
-     max-width:860px;margin:20px auto;padding:0 16px;line-height:1.55}
+     max-width:860px;margin:20px auto;padding:0 16px;line-height:1.55;
+     background:#0d1117;color:#fff}
 h1{font-size:1.4rem;margin:0 0 4px}
-.sub{color:#888;margin-bottom:18px;font-size:.9rem}
+.sub{color:#9aa4b2;margin-bottom:18px;font-size:.9rem}
 .card{border:1px solid #4443;border-radius:10px;padding:14px 18px;margin-bottom:14px}
 .section-title{font-weight:600;font-size:1.05rem;margin:0 0 12px;display:flex;
                align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .section-title .right{display:flex;align-items:center;gap:10px}
-.state{font-size:.82rem;color:#888}
-.state.on{color:#2a8a2a}.state.off{color:#a05}
+.state{font-size:.82rem;color:#9aa4b2}
+.state.on{color:#3fb950}.state.off{color:#f85149}
 .field{display:grid;grid-template-columns:160px 1fr;gap:10px;align-items:center;margin-bottom:9px}
-.field label{color:#888;font-size:.88rem}
-.field .desc{color:#888;font-size:.78rem;grid-column:2;margin-top:-4px}
+.field label{color:#9aa4b2;font-size:.88rem}
+.field .desc{color:#8b95a3;font-size:.78rem;grid-column:2;margin-top:-4px}
 .field input[type=text],.field input[type=number],.field input[type=password]{
   width:100%;padding:7px 10px;border:1px solid #8884;border-radius:5px;
   background:transparent;color:inherit;font-size:.92rem;font-family:inherit;box-sizing:border-box}
@@ -274,16 +275,16 @@ button.secondary{background:#888}
 button.secondary:hover{background:#666}
 button.big{padding:9px 20px;font-size:.95rem;min-width:160px}
 .result{font-size:.85rem;margin-top:8px;padding:7px 10px;border-radius:6px;display:none}
-.result.ok{display:block;background:#1f8b4c22;color:#1f8b4c}
-.result.err{display:block;background:#d62b2b22;color:#d62b2b}
-.foot{color:#888;font-size:.83rem;margin-top:18px}
+.result.ok{display:block;background:#1f8b4c22;color:#3fb950}
+.result.err{display:block;background:#d62b2b22;color:#ff6b6b}
+.foot{color:#8b95a3;font-size:.83rem;margin-top:18px}
 code{background:#8884;padding:1px 5px;border-radius:3px}
 .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
          position:fixed;left:0;right:0;bottom:0;z-index:50;
-         background:#fffd;backdrop-filter:blur(10px);
-         padding:12px 16px;border-top:1px solid #4443;
-         box-shadow:0 -4px 12px #0002}
-@media (prefers-color-scheme:dark){.actions{background:#0d1117ee;border-top-color:#fff2}}
+         background:#161b22ee;backdrop-filter:blur(10px);
+         padding:12px 16px;border-top:1px solid #30363d;
+         box-shadow:0 -4px 12px #0008}
+@media (prefers-color-scheme:dark){.actions{background:#161b22ee;border-top-color:#30363d}}
 .actions .inner{max-width:860px;margin:0 auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;width:100%}
 .actions .grow{flex:1}
 body{padding-bottom:90px}  /* 给底部按钮栏留空间 */
