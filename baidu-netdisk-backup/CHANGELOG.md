@@ -25,6 +25,7 @@
 - 云端文件被删后可自愈：每 `sync.recheck_days`（默认 7 天）惰性核对一次，缺失即重传；不是每轮全量 list。
 - 配置热加载读到旧值：保存时三写（Supervisor API + `/data/options.json` + 内存），API 失败时界面**如实返回失败**而不是谎报成功。
 - Web UI 新增「立即同步」（`POST /api/sync`，600 秒最小间隔）与同步状态显示。
+- Web UI 固定为深色主题（正文白字、背景 `#0d1117`），不再跟随系统配色——HA 深色主题下不再出现白底黑字。
 
 ### 新增配置项（全部可选，老配置直接可用）
 `retention.protect_manual` / `retention.max_delete_per_run` / `retention.dry_run` /
