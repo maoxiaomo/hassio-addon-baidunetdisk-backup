@@ -89,10 +89,10 @@ schema:
     max_delete_per_run: int(1,1000)?
     dry_run: bool?
   # 整段可选：老 options.json 没有这两个段落，缺省时由 parse_options() 兜底
-  retry?:
+  retry:
     deadline_seconds: float?
     cycle_budget_seconds: float?
-  sync?:
+  sync:
     recheck_days: float?
   # 通知配置 schema
   notifications:
